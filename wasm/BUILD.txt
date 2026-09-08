@@ -1,0 +1,80 @@
+Custom build of box3d-wasm, vendored for index.html.
+
+Why this exists instead of the unpkg-hosted box3d-wasm@0.2.0:
+Erin Catto's Box3D (https://github.com/erincatto/box3d) has a native
+world-state recording API (b3CreateRecording / b3World_StartRecording /
+b3World_StopRecording / b3Recording_GetData, etc. -- see box3d.h's
+"recording" group) that box3d-wasm's embind wrapper (csrc/glue.cpp) never
+exposed. This build adds that binding on top of an otherwise-unmodified
+0.2.0 release so the marbles tool can offer a "Record 15s" button.
+
+Provenance:
+  box3d-wasm source:  https://github.com/monteslu/box3d-wasm
+  built from commit:  f38924d9253d7d1e1914ecdbe33c68577fcbfaa5 (tag: npm 0.2.0)
+  box3d engine (deps/box3d), pinned by that commit's scripts/versions.json:
+                      https://github.com/erincatto/box3d
+                      commit 29bf523ce7bc4590aba9f17c9db791cdc5c4397e
+  emsdk:              4.0.18 (the version box3d-wasm's own README says it's
+                      tested with)
+  our patches (applied in this order, both against the pinned commit's
+  unmodified csrc/glue.cpp):
+    1. recording-bindings.patch -- adds a Recording wrapper class and
+       World.startRecording/.stopRecording, so the marbles tool can offer a
+       "Record 15s" button.
+    2. mesh-shape-binding.patch -- adds Body.createMesh(), binding box3d's
+       existing (but previously unexposed) b3CreateMesh/b3CreateMeshShape so
+       the marbles tool's rails can collide as an exact static triangle mesh
+       instead of an approximating chain of capsules. b3CreateMeshShape does
+       NOT clone the b3MeshData it's given (unlike hulls, which box3d does
+       clone into its own hull database), so the patch also adds an
+       `ownedMesh` field to the Body wrapper and frees it in destroy() --
+       otherwise every collider rebuild would leak the previous mesh's BVH.
+       Verified against upstream's own box3d.h/collision.h/types.h headers,
+       and empirically (a mesh floor built with this binding correctly holds
+       a dynamic sphere resting on it, both single- and multi-threaded).
+  Everything else is stock upstream code, built with the project's own
+  scripts/build.sh, unmodified.
+
+Deliberately NOT bound: b3SaveRecordingToFile / b3LoadRecordingFromFile /
+b3ValidateReplay / b3RecPlayer* and friends. This build is compiled with
+-sFILESYSTEM=0 (no libc file I/O in the wasm sandbox, matching upstream's own
+build.sh), so the file-path functions wouldn't work here anyway. Recording.getData()
+instead hands back a zero-copy view over the wasm heap; the app copies it into
+a Uint8Array and downloads it as raw bytes via a Blob.
+
+Deliberately NOT built: the "compat" (no-SIMD, scalar) flavour. Wasm SIMD is
+baseline in every realistic target browser and wasn't part of the app's
+existing dependency footprint (it only ever imported the plain box3d.mjs).
+entry.mjs in this directory was trimmed accordingly -- see the comment there.
+
+Files:
+  entry.mjs          auto-detecting loader (trimmed vs. upstream -- no
+                      no-SIMD/"compat" fallback, see comment in the file)
+  box3d.mjs / .wasm       standard flavour (SIMD, single-threaded)
+  box3d.deluxe.mjs / .wasm   deluxe flavour (SIMD + wasm threads)
+  recording-bindings.patch   our diff against csrc/glue.cpp (patch 1, above)
+  mesh-shape-binding.patch   our diff against csrc/glue.cpp (patch 2, above;
+                             applies on top of recording-bindings.patch)
+  LICENSE.box3d-wasm-wrapper.txt   box3d-wasm's own license (MIT)
+  LICENSE.box3d.txt                upstream Box3D's license (MIT, Erin Catto)
+
+Deluxe needs a cross-origin-isolated page (COOP/COEP response headers) for
+SharedArrayBuffer, which GitHub Pages cannot send -- so on this site
+entry.mjs's runtime feature-detection always resolves to the standard
+flavour today. Both flavours are still vendored: entry.mjs will pick up
+deluxe automatically if this file set is ever served somewhere that can set
+those headers.
+
+To reproduce or update this build:
+  git clone https://github.com/monteslu/box3d-wasm
+  cd box3d-wasm && git checkout f38924d9253d7d1e1914ecdbe33c68577fcbfaa5
+  git apply /path/to/recording-bindings.patch
+  git apply /path/to/mesh-shape-binding.patch
+  npm ci
+  npm run fetch-deps
+  # activate emsdk 4.0.18 first (emsdk install 4.0.18 && emsdk activate 4.0.18
+  # && source emsdk_env.sh)
+  FLAVOURS="standard deluxe" bash scripts/build.sh
+  # dist/entry.mjs, dist/box3d.mjs(.wasm), dist/box3d.deluxe.mjs(.wasm)
+  # (entry.mjs from dist/ is upstream's own; this directory's entry.mjs is
+  # hand-trimmed as described above and is not overwritten by the build)

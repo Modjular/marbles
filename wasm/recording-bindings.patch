@@ -1,0 +1,89 @@
+diff --git a/csrc/glue.cpp b/csrc/glue.cpp
+index f839721..c8cb56a 100644
+--- a/csrc/glue.cpp
++++ b/csrc/glue.cpp
+@@ -1169,6 +1169,47 @@ static void applyJointBase( b3JointDef* base, const Body& a, const Body& b, cons
+ 	base->torqueThreshold = getFloat( opts, "torqueThreshold", base->torqueThreshold );
+ }
+ 
++// Owns a b3Recording buffer. This build has FILESYSTEM=0 (no libc file I/O in
++// the wasm sandbox), so b3SaveRecordingToFile/b3LoadRecordingFromFile/
++// b3ValidateReplay/b3RecPlayer* are deliberately not bound here -- those all
++// assume a real filesystem underneath. getData() instead hands back a raw
++// view over the wasm heap so JS can copy the bytes into a Blob itself.
++struct Recording
++{
++	b3Recording* ptr;
++
++	explicit Recording( int byteCapacity )
++	{
++		ptr = b3CreateRecording( byteCapacity );
++	}
++
++	void destroy()
++	{
++		b3DestroyRecording( ptr );
++		ptr = nullptr;
++	}
++
++	int getSize() const
++	{
++		return b3Recording_GetSize( ptr );
++	}
++
++	// Zero-copy view over the recording's current bytes. Only valid until the
++	// next call that mutates or destroys this recording (a subsequent
++	// StartRecording reset, or destroy()) -- copy out of it (e.g. `new
++	// Uint8Array(view)`) before doing anything else with the recording.
++	val getData() const
++	{
++		int size = b3Recording_GetSize( ptr );
++		const uint8_t* data = b3Recording_GetData( ptr );
++		if ( size <= 0 || data == nullptr )
++		{
++			return val( emscripten::typed_memory_view( 0, (const uint8_t*)nullptr ) );
++		}
++		return val( emscripten::typed_memory_view( size, data ) );
++	}
++};
++
+ struct World
+ {
+ 	b3WorldId id;
+@@ -1615,6 +1656,19 @@ struct World
+ 		o.set( "solve", p.solve );
+ 		return o;
+ 	}
++
++	// Recording: capture world mutations into `recording` until stopRecording()
++	// is called. The recording buffer is reset on each startRecording() call,
++	// so one Recording can be reused across sessions (see b3World_StartRecording).
++	void startRecording( const Recording& recording )
++	{
++		b3World_StartRecording( id, recording.ptr );
++	}
++
++	void stopRecording()
++	{
++		b3World_StopRecording( id );
++	}
+ };
+ 
+ // ---------------------------------------------------------------------------
+@@ -1659,7 +1713,15 @@ EMSCRIPTEN_BINDINGS( box3d )
+ 		.function( "getBodyEvents", &World::getBodyEvents )
+ 		.function( "getContactEvents", &World::getContactEvents )
+ 		.function( "getSensorEvents", &World::getSensorEvents )
+-		.function( "getProfile", &World::getProfile );
++		.function( "getProfile", &World::getProfile )
++		.function( "startRecording", &World::startRecording )
++		.function( "stopRecording", &World::stopRecording );
++
++	class_<Recording>( "Recording" )
++		.constructor<int>()
++		.function( "destroy", &Recording::destroy )
++		.function( "getSize", &Recording::getSize )
++		.function( "getData", &Recording::getData );
+ 
+ 	class_<Body>( "Body" )
+ 		.function( "isValid", &Body::isValid )

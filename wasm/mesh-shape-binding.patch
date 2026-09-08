@@ -1,0 +1,105 @@
+diff --git a/csrc/glue.cpp b/csrc/glue.cpp
+index c8cb56a..939e76a 100644
+--- a/csrc/glue.cpp
++++ b/csrc/glue.cpp
+@@ -777,6 +777,13 @@ struct Body
+ {
+ 	b3BodyId id;
+ 
++	// Unlike hulls (which the world interns into its own hull database, see
++	// createHull below), b3CreateMeshShape does NOT clone the b3MeshData it's
++	// given -- box3d.h: "The shape definition is fully cloned but the mesh is
++	// not." So a body that creates a mesh shape via createMesh() owns that
++	// heap allocation for as long as the shape lives, and must free it here.
++	b3MeshData* ownedMesh = nullptr;
++
+ 	bool isValid() const
+ 	{
+ 		return b3Body_IsValid( id );
+@@ -786,6 +793,11 @@ struct Body
+ 	{
+ 		b3DestroyBody( id );
+ 		id = b3_nullBodyId;
++		if ( ownedMesh != nullptr )
++		{
++			b3DestroyMesh( ownedMesh );
++			ownedMesh = nullptr;
++		}
+ 	}
+ 
+ 	std::string getType() const
+@@ -1148,6 +1160,64 @@ struct Body
+ 		b3DestroyHull( hull );
+ 		return shape;
+ 	}
++
++	// Static triangle-mesh collider, e.g. for a track/terrain too irregular
++	// for a hull. `vertices` is an array of {x,y,z}; `indices` is a flat
++	// array of 3 vertex indices per triangle. Mesh collision only creates
++	// contacts on static bodies (see b3CreateMeshShape).
++	Shape createMesh( val opts )
++	{
++		b3ShapeDef def = shapeDefFromOpts( opts );
++
++		std::vector<b3Vec3> vertices;
++		val vArr = opts["vertices"];
++		int vertexCount = vArr["length"].as<int>();
++		vertices.reserve( vertexCount );
++		for ( int i = 0; i < vertexCount; ++i )
++		{
++			vertices.push_back( toVec3( vArr[i], b3Vec3_zero ) );
++		}
++
++		std::vector<int32_t> indices;
++		val iArr = opts["indices"];
++		int indexCount = iArr["length"].as<int>();
++		indices.reserve( indexCount );
++		for ( int i = 0; i < indexCount; ++i )
++		{
++			indices.push_back( iArr[i].as<int32_t>() );
++		}
++
++		b3MeshDef meshDef = {};
++		meshDef.vertices = vertices.data();
++		meshDef.indices = indices.data();
++		meshDef.materialIndices = nullptr;
++		meshDef.weldTolerance = getFloat( opts, "weldTolerance", 0.0f );
++		meshDef.vertexCount = (int)vertices.size();
++		meshDef.triangleCount = (int)indices.size() / 3;
++		meshDef.weldVertices = getBool( opts, "weldVertices", false );
++		meshDef.useMedianSplit = getBool( opts, "useMedianSplit", false );
++		meshDef.identifyEdges = getBool( opts, "identifyEdges", false );
++
++		b3MeshData* mesh = b3CreateMesh( &meshDef, nullptr, 0 );
++		if ( mesh == nullptr )
++		{
++			Shape shape = { b3_nullShapeId };
++			return shape;
++		}
++
++		b3Vec3 defaultScale = { 1.0f, 1.0f, 1.0f };
++		b3Vec3 scale = getVec3( opts, "scale", defaultScale );
++		Shape shape = { b3CreateMeshShape( id, &def, mesh, scale ) };
++
++		// See `ownedMesh` above: the shape does not clone this, so the body
++		// frees it in destroy() instead of here.
++		if ( ownedMesh != nullptr )
++		{
++			b3DestroyMesh( ownedMesh );
++		}
++		ownedMesh = mesh;
++		return shape;
++	}
+ };
+ 
+ static void applyJointBase( b3JointDef* base, const Body& a, const Body& b, const val& opts )
+@@ -1773,7 +1843,8 @@ EMSCRIPTEN_BINDINGS( box3d )
+ 		.function( "createSphere", &Body::createSphere )
+ 		.function( "createCapsule", &Body::createCapsule )
+ 		.function( "createBox", &Body::createBox )
+-		.function( "createHull", &Body::createHull );
++		.function( "createHull", &Body::createHull )
++		.function( "createMesh", &Body::createMesh );
+ 
+ 	class_<Shape>( "Shape" )
+ 		.function( "isValid", &Shape::isValid )
