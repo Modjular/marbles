@@ -27,11 +27,16 @@ Provenance:
        instead of an approximating chain of capsules. b3CreateMeshShape does
        NOT clone the b3MeshData it's given (unlike hulls, which box3d does
        clone into its own hull database), so the patch also adds an
-       `ownedMesh` field to the Body wrapper and frees it in destroy() --
-       otherwise every collider rebuild would leak the previous mesh's BVH.
+       `ownedMeshes` list to the Body wrapper and frees every mesh it owns in
+       destroy() -- otherwise every collider rebuild would leak the previous
+       mesh's BVH. It is a list, not a single pointer, because one body may
+       create more than one mesh shape and each shape keeps referencing its
+       own un-cloned mesh; a single slot that a later createMesh() overwrote
+       and freed would leave the earlier shape pointing at freed memory.
        Verified against upstream's own box3d.h/collision.h/types.h headers,
        and empirically (a mesh floor built with this binding correctly holds
-       a dynamic sphere resting on it, both single- and multi-threaded).
+       a dynamic sphere resting on it, both single- and multi-threaded, and a
+       body carrying two mesh shapes tears down cleanly).
   Everything else is stock upstream code, built with the project's own
   scripts/build.sh, unmodified.
 

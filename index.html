@@ -2020,6 +2020,7 @@ import Box3D from "box3d-wasm";
     updateSimUI();
   }
   function stopSim() {
+    cancelRecording(); // a reset (or a world rebuild, which calls stopSim) aborts any capture
     clearMarbles();
     simStarted = false;
     simRunning = false;
@@ -2046,7 +2047,32 @@ import Box3D from "box3d-wasm";
   let recordCountdown = 0;
   let recordIntervalId = null;
 
+  function resetRecordButton() {
+    recordBtn.disabled = false;
+    recordBtn.textContent = "Record 15s";
+  }
+
+  // Abort an in-flight recording WITHOUT touching the world or downloading
+  // anything. Called when the world is torn down (contact-tuning slider ->
+  // scheduleWorldRebuild -> recreatePhysicsWorld) or the sim is reset out from
+  // under an active capture -- otherwise activeRecording and its interval would
+  // outlive the world they were bound to, and finishRecording would later call
+  // stopRecording() on a fresh, never-recording world and download truncated
+  // garbage. We deliberately do NOT call physicsWorld.stopRecording() here: the
+  // world reference may already be mid-teardown, and destroying the Recording
+  // frees its buffer regardless.
+  function cancelRecording() {
+    if (!activeRecording) return;
+    clearInterval(recordIntervalId);
+    recordIntervalId = null;
+    activeRecording.destroy();
+    activeRecording.delete();
+    activeRecording = null;
+    resetRecordButton();
+  }
+
   function finishRecording() {
+    if (!activeRecording) return; // already cancelled by a world rebuild/reset
     clearInterval(recordIntervalId);
     recordIntervalId = null;
     physicsWorld.stopRecording();
@@ -2067,14 +2093,17 @@ import Box3D from "box3d-wasm";
     a.remove();
     URL.revokeObjectURL(url);
 
-    recordBtn.disabled = false;
-    recordBtn.textContent = "Record 15s";
+    resetRecordButton();
   }
 
   recordBtn.addEventListener("click", () => {
     if (activeRecording) return;
     if (!simStarted) startSim();
 
+    // 0 = box3d's default initial capacity (65536 bytes) -- the buffer
+    // auto-doubles as the capture grows (see b3CreateRecording / the b3RecBuffer
+    // grow path in box3d's recording.c), so this is not a fixed 0-byte buffer.
+    // box3d's own recording tests all construct with 0 the same way.
     activeRecording = new b3.Recording(0);
     physicsWorld.startRecording(activeRecording);
     recordCountdown = RECORDING_SECONDS;
