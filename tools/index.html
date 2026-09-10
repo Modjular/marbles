@@ -1,0 +1,571 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>corkscrew rig tester</title>
+<style>
+  /* Everything in one file on purpose -- see the big comment at the top of the
+     module script below for why this tool exists and what it's for. */
+  html, body { margin: 0; height: 100%; background: #1b1d24; color: #dde1e8; font: 13px/1.4 system-ui, sans-serif; overflow: hidden; }
+  #canvas-wrap { position: absolute; inset: 0; }
+  canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+
+  #panel {
+    position: absolute; top: 0; right: 0; bottom: 0; width: 300px;
+    background: rgba(20, 21, 27, 0.92); border-left: 1px solid #333;
+    overflow-y: auto; padding: 12px 14px 40px; box-sizing: border-box;
+  }
+  #panel h1 { font-size: 14px; margin: 0 0 4px; }
+  #panel .sub { color: #8a8f9c; margin: 0 0 14px; font-size: 11.5px; }
+  #panel fieldset { border: 1px solid #383b46; border-radius: 6px; margin: 0 0 12px; padding: 8px 10px 10px; }
+  #panel legend { padding: 0 4px; color: #b7bcc8; font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .row { display: flex; align-items: center; gap: 6px; margin: 5px 0; }
+  .row label { flex: 1 1 auto; color: #c3c7d1; }
+  .row input[type="range"] { flex: 1 1 90px; width: 90px; }
+  .row output { width: 40px; text-align: right; color: #8fd0ff; font-variant-numeric: tabular-nums; }
+  .row input[type="checkbox"] { margin-right: 4px; }
+  .btnrow { display: flex; gap: 6px; margin-top: 4px; }
+  button { flex: 1; background: #2a2d38; border: 1px solid #454957; color: #dde1e8; border-radius: 5px; padding: 6px 8px; cursor: pointer; font-size: 12px; }
+  button:hover { background: #343845; }
+  button.primary { background: #2f5d8a; border-color: #3d74ab; }
+  button.primary:hover { background: #366a9c; }
+  #stats { color: #6f7480; font-size: 11px; margin-top: 6px; }
+  #note { font-size: 11px; color: #8a8f9c; border-top: 1px solid #333; margin-top: 10px; padding-top: 10px; }
+  #note b { color: #c3c7d1; }
+</style>
+</head>
+<body>
+  <div id="canvas-wrap"><canvas id="c"></canvas></div>
+
+  <div id="panel">
+    <h1>Corkscrew rig tester</h1>
+    <p class="sub">Isolated scaffold: bowl + column + single-rail screw + outer posts + a
+      handful of marbles. No splines, no track. Every knob below rebuilds live.</p>
+
+    <fieldset>
+      <legend>Column</legend>
+      <div class="row"><label for="columnR">Radius</label><input id="columnR" type="range" min="0.05" max="0.4" step="0.01"><output></output></div>
+      <div class="row"><label for="height">Height</label><input id="height" type="range" min="2" max="9" step="0.1"><output></output></div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Single rail (the screw)</legend>
+      <div class="row"><label for="railR">Radius from axis</label><input id="railR" type="range" min="0.2" max="1.2" step="0.01"><output></output></div>
+      <div class="row"><label for="railCapR">Rail thickness</label><input id="railCapR" type="range" min="0.02" max="0.18" step="0.005"><output></output></div>
+      <div class="row"><label for="railTurns">Turns</label><input id="railTurns" type="range" min="1" max="14" step="0.5"><output></output></div>
+      <div class="row"><label for="railSegs">Segments/turn</label><input id="railSegs" type="range" min="6" max="40" step="1"><output></output></div>
+      <div class="row"><input id="railSpinOn" type="checkbox"><label for="railSpinOn">Spin the rail</label></div>
+      <div class="row"><label for="railSpeed">Rail speed</label><input id="railSpeed" type="range" min="-8" max="8" step="0.1"><output></output></div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Outer posts</legend>
+      <div class="row"><label for="postCount">Count</label><input id="postCount" type="range" min="0" max="32" step="1"><output></output></div>
+      <div class="row"><label for="postR">Radius from axis</label><input id="postR" type="range" min="0.3" max="1.6" step="0.01"><output></output></div>
+      <div class="row"><label for="postCapR">Post thickness</label><input id="postCapR" type="range" min="0.02" max="0.15" step="0.005"><output></output></div>
+      <div class="row"><input id="postSpinOn" type="checkbox"><label for="postSpinOn">Spin the posts</label></div>
+      <div class="row"><label for="postSpeed">Post speed</label><input id="postSpeed" type="range" min="-8" max="8" step="0.1"><output></output></div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Bowl (floor)</legend>
+      <div class="row"><label for="bowlR">Radius</label><input id="bowlR" type="range" min="1.5" max="6" step="0.1"><output></output></div>
+      <div class="row"><label for="bowlDepth">Depth</label><input id="bowlDepth" type="range" min="0.2" max="2.5" step="0.05"><output></output></div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Marbles</legend>
+      <div class="row"><label for="marbleCount">Count</label><input id="marbleCount" type="range" min="1" max="24" step="1"><output></output></div>
+      <div class="row"><label for="marbleFriction">Friction</label><input id="marbleFriction" type="range" min="0" max="1" step="0.02"><output></output></div>
+      <div class="row"><label for="marbleRestitution">Restitution</label><input id="marbleRestitution" type="range" min="0" max="0.8" step="0.02"><output></output></div>
+      <div class="btnrow"><button id="resetMarbles" class="primary">Reset marbles</button></div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Contact solver</legend>
+      <div class="row"><label for="contactHertz">Hertz</label><input id="contactHertz" type="range" min="1" max="60" step="1"><output></output></div>
+      <div class="row"><label for="contactDamping">Damping ratio</label><input id="contactDamping" type="range" min="0" max="20" step="0.5"><output></output></div>
+      <div class="row"><label for="railFriction">Rail/post friction</label><input id="railFriction" type="range" min="0" max="1" step="0.02"><output></output></div>
+    </fieldset>
+
+    <div class="btnrow">
+      <button id="pauseBtn">Pause</button>
+      <button id="rebuildBtn">Rebuild</button>
+    </div>
+    <div id="stats"></div>
+
+    <div id="note">
+      <b>Engine note:</b> in this box3d-wasm build, a spinning (kinematic) capsule
+      reliably delivers a glancing/transient push, but a marble cannot stably
+      <i>rest</i> on top of one -- it eventually slips through. So "spin the rail"
+      is a genuine experiment (it may just drop marbles), while "spin the posts"
+      is the mechanism most likely to actually carry marbles up the static rail's
+      slope, the same way the paddles do in the main app. Tune away.
+    </div>
+  </div>
+
+<script type="module">
+// =============================================================================
+// Corkscrew rig tester
+// =============================================================================
+// A standalone scaffold for hand-tuning the "return marbles to the top" lift,
+// isolated from the marble-run app (no 2D editor, no spline, no track). Deliberately
+// a single file so every knob and every body is visible in one place while tuning.
+//
+// Shape of the rig, base (y=0) to top (y=height):
+//   - a static central COLUMN capsule
+//   - a single helical RAIL: one chain of tilted capsules winding around the column
+//     (the "corkscrew" itself -- a single wire, not the twin-rail ribbon the main
+//     app's track uses)
+//   - a ring of vertical OUTER POSTS (capsules) some distance further out
+//   - a cone-shaped BOWL floor beneath it all, funneling stray marbles to the base
+//   - a handful of marbles dropped in a ring around that base
+//
+// Every one of the rig's *moving-part candidates* (rail, posts) is built purely
+// from box3d capsules -- per the ask, no meshes anywhere except the bowl floor
+// (which nothing needs to roll along and nothing spins, so a triangle mesh is
+// fine there, same technique as physics.js/corkscrew.js in the main app).
+//
+// IMPORTANT ENGINE FINDING (from prototyping this in Node against the same wasm
+// build the browser uses -- see the git history / PR description for the actual
+// repro scripts): a box3d KINEMATIC body's CAPSULE shapes reliably deliver a
+// brief/glancing collision impulse to a dynamic body while spinning, but a marble
+// cannot stably *rest* on top of a spinning capsule for more than a few frames --
+// sustained/resting contact against a rotating capsule breaks down and the marble
+// falls through, regardless of the capsule's orientation (this reproduces even
+// for plain vertical capsules, not just tilted ones). Transient pushes, on the
+// other hand, work fine at any orientation. That's why the rail defaults to
+// static (it's the thing marbles rest ON) and the posts default to spinning
+// (they only need to bump marbles along) -- but both are wired up as toggles so
+// you can feel the difference yourself, per the "let me experiment" ask. Turning
+// "Spin the rail" on is expected to look broken (marbles dropping through it) --
+// that's the engine limit talking, not a bug in this file.
+// =============================================================================
+
+import * as THREE from "https://unpkg.com/three@0.169.0/build/three.module.js";
+import Box3D from "../wasm/entry.mjs";
+
+const b3 = await Box3D();
+
+// ---- Tunable parameters (every UI control below writes into this one object) ----
+const params = {
+  columnR: 0.16,
+  height: 5.5,
+
+  railR: 0.5,
+  railCapR: 0.09,
+  railTurns: 7,
+  railSegs: 20,       // segments per turn
+  railSpinOn: false,
+  railSpeed: 3,
+
+  postCount: 16,
+  postR: 0.9,
+  postCapR: 0.06,
+  postSpinOn: true,
+  postSpeed: 2.5,
+
+  bowlR: 3.2,
+  bowlDepth: 1.1,
+
+  marbleCount: 8,
+  marbleR: 0.18,
+  marbleFriction: 0.3,
+  marbleRestitution: 0.05,
+
+  contactHertz: 7,
+  contactDamping: 8,
+  railFriction: 0.45,
+};
+
+// ---- Materials (kept simple -- this is a rig tester, not a showpiece) ----
+const COLUMN_MAT = new THREE.MeshStandardMaterial({ color: 0x9aa3ad, metalness: 0.7, roughness: 0.35 });
+const RAIL_MAT = new THREE.MeshStandardMaterial({ color: 0xc26b3f, metalness: 0.25, roughness: 0.55 });
+const POST_MAT = new THREE.MeshStandardMaterial({ color: 0xef4a5f, metalness: 0.35, roughness: 0.45 });
+const BOWL_MAT = new THREE.MeshStandardMaterial({ color: 0xb08968, roughness: 0.85, side: THREE.DoubleSide });
+const MARBLE_MAT = new THREE.MeshStandardMaterial({ color: 0xd7dade, metalness: 1.0, roughness: 0.2 });
+const MARBLE_GEO = new THREE.SphereGeometry(1, 24, 16); // unit sphere, scaled per marbleR
+
+// ---- Scene / camera / renderer ----
+const canvas = document.getElementById("c");
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1b1d24);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x33302a, 0.9));
+const sun = new THREE.DirectionalLight(0xfff2d0, 1.1);
+sun.position.set(5, 9, 4);
+scene.add(sun);
+
+// A plain generated env map so metal reads as metal -- see scene3d.js for the
+// fancier version; this one is deliberately minimal.
+{
+  const envScene = new THREE.Scene();
+  const g = new THREE.SphereGeometry(30, 16, 12);
+  envScene.add(new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: 0x8891a0, side: THREE.BackSide })));
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromScene(envScene, 0.04).texture;
+  pmrem.dispose();
+}
+
+const camera = new THREE.PerspectiveCamera(50, 1, 0.05, 100);
+let azimuth = 0.7, elevation = 0.45, radius = 9, zoom = 1;
+const target = new THREE.Vector3(0, params.height * 0.35, 0);
+function updateCamera() {
+  const ce = Math.cos(elevation);
+  camera.position.set(
+    target.x + radius * ce * Math.sin(azimuth),
+    target.y + radius * Math.sin(elevation),
+    target.z + radius * ce * Math.cos(azimuth)
+  );
+  camera.lookAt(target);
+}
+updateCamera();
+
+function resize() {
+  const w = window.innerWidth - 300, h = window.innerHeight;
+  camera.aspect = Math.max(w, 1) / h;
+  camera.updateProjectionMatrix();
+  renderer.setSize(Math.max(w, 1), h);
+}
+window.addEventListener("resize", resize);
+resize();
+
+// ---- Minimal orbit camera (drag to orbit, wheel to zoom) ----
+let dragging = false, lastX = 0, lastY = 0;
+canvas.addEventListener("pointerdown", (e) => { dragging = true; lastX = e.clientX; lastY = e.clientY; canvas.setPointerCapture(e.pointerId); });
+canvas.addEventListener("pointerup", (e) => { dragging = false; try { canvas.releasePointerCapture(e.pointerId); } catch (_) {} });
+canvas.addEventListener("pointermove", (e) => {
+  if (!dragging) return;
+  azimuth -= (e.clientX - lastX) * 0.008;
+  elevation = THREE.MathUtils.clamp(elevation + (e.clientY - lastY) * 0.008, -1.4, 1.4);
+  lastX = e.clientX; lastY = e.clientY;
+  updateCamera();
+});
+canvas.addEventListener("wheel", (e) => {
+  e.preventDefault();
+  zoom = THREE.MathUtils.clamp(zoom * (e.deltaY > 0 ? 1.1 : 1 / 1.1), 0.3, 4);
+  radius = 9 * zoom;
+  updateCamera();
+}, { passive: false });
+
+// =============================================================================
+// Physics world + rig construction
+// =============================================================================
+let world = null;
+let columnBody = null, columnGroup = null;
+let railBody = null, railGroup = null;
+let postsBody = null, postsGroup = null;
+let bowlBody = null, bowlMesh = null;
+let marbles = []; // { body, mesh }
+
+// A capsule mesh matching a box3d createCapsule({center1, center2, radius}) shape
+// exactly -- three's CapsuleGeometry runs along local +Y from -len/2 to +len/2, so
+// each mesh gets a one-time local transform (position = midpoint, rotation = the
+// twist that carries +Y onto the center1->center2 direction) and is then parented
+// under its body's group, which is the only thing moved/rotated per frame.
+const upAxis = new THREE.Vector3(0, 1, 0);
+function capsuleMesh(center1, center2, radius, material) {
+  const p1 = new THREE.Vector3(center1.x, center1.y, center1.z);
+  const p2 = new THREE.Vector3(center2.x, center2.y, center2.z);
+  const mid = p1.clone().add(p2).multiplyScalar(0.5);
+  const dir = p2.clone().sub(p1);
+  const len = dir.length();
+  const mesh = new THREE.Mesh(new THREE.CapsuleGeometry(radius, Math.max(len, 1e-4), 4, 8), material);
+  mesh.position.copy(mid);
+  if (len > 1e-6) {
+    dir.normalize();
+    mesh.quaternion.setFromUnitVectors(upAxis, dir);
+  }
+  return mesh;
+}
+
+function destroyRig() {
+  for (const m of marbles) { m.body.destroy(); scene.remove(m.mesh); }
+  marbles = [];
+  for (const grp of [columnGroup, railGroup, postsGroup]) {
+    if (!grp) continue;
+    scene.remove(grp);
+    grp.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
+  }
+  columnGroup = railGroup = postsGroup = null;
+  if (bowlMesh) { scene.remove(bowlMesh); bowlMesh.geometry.dispose(); bowlMesh = null; }
+  if (world) world.destroy();
+  columnBody = railBody = postsBody = bowlBody = null;
+}
+
+// Triangle winding for the bowl: emit each triangle facing `ref` (see track.js's
+// buildRailTubeGeometry / corkscrew.js's pushTri in the main app for the same
+// pattern) since box3d mesh triangles only collide from the side their normal faces.
+const _ab = new THREE.Vector3(), _ac = new THREE.Vector3(), _n = new THREE.Vector3();
+function pushTri(positions, indices, ia, ib, ic, refX, refY, refZ) {
+  _ab.set(positions[ib * 3] - positions[ia * 3], positions[ib * 3 + 1] - positions[ia * 3 + 1], positions[ib * 3 + 2] - positions[ia * 3 + 2]);
+  _ac.set(positions[ic * 3] - positions[ia * 3], positions[ic * 3 + 1] - positions[ia * 3 + 1], positions[ic * 3 + 2] - positions[ia * 3 + 2]);
+  _n.crossVectors(_ab, _ac);
+  if (_n.x * refX + _n.y * refY + _n.z * refZ >= 0) indices.push(ia, ib, ic);
+  else indices.push(ia, ic, ib);
+}
+
+function buildBowl() {
+  const RINGS = 20, SEGS = 48;
+  const R = params.bowlR, depth = params.bowlDepth;
+  const positions = [], uvs = [], indices = [];
+  positions.push(0, -depth, 0); uvs.push(0.5, 0.5); // apex, at the column's base
+  for (let i = 1; i <= RINGS; i++) {
+    const r = (i / RINGS) * R;
+    const y = -depth * (1 - r / R);
+    for (let j = 0; j < SEGS; j++) {
+      const th = (j / SEGS) * Math.PI * 2;
+      const x = Math.cos(th) * r, z = Math.sin(th) * r;
+      positions.push(x, y, z);
+      uvs.push(x / (2 * R) + 0.5, z / (2 * R) + 0.5);
+    }
+  }
+  const ringStart = (i) => 1 + (i - 1) * SEGS;
+  for (let j = 0; j < SEGS; j++) {
+    const a = ringStart(1) + j, b = ringStart(1) + ((j + 1) % SEGS);
+    pushTri(positions, indices, 0, a, b, 0, 1, 0);
+  }
+  for (let i = 1; i < RINGS; i++) {
+    for (let j = 0; j < SEGS; j++) {
+      const j2 = (j + 1) % SEGS;
+      const a = ringStart(i) + j, b = ringStart(i) + j2, c = ringStart(i + 1) + j, d = ringStart(i + 1) + j2;
+      pushTri(positions, indices, a, c, b, 0, 1, 0);
+      pushTri(positions, indices, b, c, d, 0, 1, 0);
+    }
+  }
+  const vertices = new Array(positions.length / 3);
+  for (let i = 0; i < vertices.length; i++) vertices[i] = { x: positions[i * 3], y: positions[i * 3 + 1], z: positions[i * 3 + 2] };
+  bowlBody = world.createBody({ type: "static" });
+  bowlBody.createMesh({ vertices, indices, friction: 0.35, restitution: 0.02 });
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  bowlMesh = new THREE.Mesh(geo, BOWL_MAT);
+  scene.add(bowlMesh);
+}
+
+function buildColumn() {
+  columnBody = world.createBody({ type: "static", position: { x: 0, y: 0, z: 0 } });
+  const c1 = { x: 0, y: -0.2, z: 0 }, c2 = { x: 0, y: params.height + 0.2, z: 0 };
+  columnBody.createCapsule({ center1: c1, center2: c2, radius: params.columnR, density: 1, friction: 0.4, restitution: 0 });
+  columnGroup = new THREE.Group();
+  columnGroup.add(capsuleMesh(c1, c2, params.columnR, COLUMN_MAT));
+  scene.add(columnGroup);
+}
+
+// The single-rail screw: one static (by default) chain of tilted capsules
+// following a true helix from the base to the top. See the engine-note comment
+// above for why this defaults to static rather than spinning.
+function buildRail() {
+  const N = Math.max(1, Math.round(params.railTurns * params.railSegs));
+  const pts = new Array(N + 1);
+  for (let s = 0; s <= N; s++) {
+    const f = s / N;
+    const phi = f * params.railTurns * Math.PI * 2;
+    pts[s] = { x: Math.cos(phi) * params.railR, y: f * params.height, z: Math.sin(phi) * params.railR };
+  }
+  railBody = world.createBody({
+    type: params.railSpinOn ? "kinematic" : "static",
+    position: { x: 0, y: 0, z: 0 },
+    angularVelocity: { x: 0, y: params.railSpinOn ? params.railSpeed : 0, z: 0 },
+  });
+  railGroup = new THREE.Group();
+  for (let s = 0; s < N; s++) {
+    railBody.createCapsule({ center1: pts[s], center2: pts[s + 1], radius: params.railCapR, density: 1, friction: params.railFriction, restitution: 0 });
+    railGroup.add(capsuleMesh(pts[s], pts[s + 1], params.railCapR, RAIL_MAT));
+  }
+  scene.add(railGroup);
+}
+
+// The outer posts: a ring of vertical capsules, evenly spaced. Defaults to
+// spinning -- vertical (spin-axis-aligned) capsules are the orientation the
+// engine handles best for a moving pusher (see engine-note comment above).
+function buildPosts() {
+  if (params.postCount <= 0) return;
+  postsBody = world.createBody({
+    type: params.postSpinOn ? "kinematic" : "static",
+    position: { x: 0, y: 0, z: 0 },
+    angularVelocity: { x: 0, y: params.postSpinOn ? params.postSpeed : 0, z: 0 },
+  });
+  postsGroup = new THREE.Group();
+  for (let k = 0; k < params.postCount; k++) {
+    const a = (k / params.postCount) * Math.PI * 2;
+    const px = Math.cos(a) * params.postR, pz = Math.sin(a) * params.postR;
+    const c1 = { x: px, y: -0.1, z: pz }, c2 = { x: px, y: params.height + 0.1, z: pz };
+    postsBody.createCapsule({ center1: c1, center2: c2, radius: params.postCapR, density: 1, friction: 0.3, restitution: 0 });
+    postsGroup.add(capsuleMesh(c1, c2, params.postCapR, POST_MAT));
+  }
+  scene.add(postsGroup);
+}
+
+// Marbles scattered in a ring "around the base of the corkscrew" (between the
+// column and whatever containment exists), as asked -- not up in the channel,
+// so you can watch them (fail to, or manage to) find their way in from rest.
+function spawnMarbles() {
+  for (const m of marbles) { m.body.destroy(); scene.remove(m.mesh); }
+  marbles = [];
+  const ringR = Math.min(params.postCount > 0 ? params.postR * 0.85 : params.railR * 1.4, params.bowlR * 0.6);
+  for (let i = 0; i < params.marbleCount; i++) {
+    const a = (i / params.marbleCount) * Math.PI * 2 + 0.001; // tiny offset so none land exactly on a post
+    const x = Math.cos(a) * ringR, z = Math.sin(a) * ringR;
+    const body = world.createBody({ type: "dynamic", position: { x, y: params.marbleR * 1.5, z } });
+    body.createSphere({ radius: params.marbleR, density: 1, friction: params.marbleFriction, restitution: params.marbleRestitution });
+    const mesh = new THREE.Mesh(MARBLE_GEO, MARBLE_MAT);
+    mesh.scale.setScalar(params.marbleR);
+    scene.add(mesh);
+    marbles.push({ body, mesh });
+  }
+  updateStats();
+}
+
+function rebuildAll() {
+  destroyRig();
+  world = new b3.World({
+    gravity: { x: 0, y: -9.8, z: 0 },
+    enableSleep: false,
+    enableContinuous: true,
+    contactHertz: params.contactHertz,
+    contactDampingRatio: params.contactDamping,
+  });
+  buildBowl();
+  buildColumn();
+  buildRail();
+  buildPosts();
+  spawnMarbles();
+  target.y = params.height * 0.35;
+  updateCamera();
+}
+
+// ---- Live spin updates (no rebuild needed -- see the UI wiring below) ----
+function applySpinLive() {
+  if (railBody && railBody.getType() === "kinematic") {
+    railBody.setAngularVelocity({ x: 0, y: params.railSpinOn ? params.railSpeed : 0, z: 0 });
+  }
+  if (postsBody && postsBody.getType() === "kinematic") {
+    postsBody.setAngularVelocity({ x: 0, y: params.postSpinOn ? params.postSpeed : 0, z: 0 });
+  }
+}
+
+// =============================================================================
+// UI wiring -- every input either rebuilds the rig or (for spin on/off + speed)
+// applies live. Structural changes (radii, counts, turns, bowl size, contact
+// solver) always go through a full rebuild since box3d has no live setters for
+// shape dimensions or world-level contact tuning (same constraint as the main
+// app's physics.js).
+// =============================================================================
+const $ = (id) => document.getElementById(id);
+
+// A control is either a plain rebuild-trigger, or (for the two spin toggles/
+// speeds) a live-apply. Everything else routes through scheduleRebuild.
+let rebuildQueued = false;
+function scheduleRebuild() {
+  if (rebuildQueued) return;
+  rebuildQueued = true;
+  requestAnimationFrame(() => { rebuildQueued = false; rebuildAll(); });
+}
+
+function bindRange(id, key, { decimals = 2, live = false } = {}) {
+  const el = $(id);
+  const out = el.nextElementSibling;
+  el.value = params[key];
+  out.textContent = Number(params[key]).toFixed(decimals);
+  el.addEventListener("input", () => {
+    params[key] = Number(el.value);
+    out.textContent = params[key].toFixed(decimals);
+    if (live) applySpinLive(); else scheduleRebuild();
+  });
+}
+function bindCheckbox(id, key) {
+  const el = $(id);
+  el.checked = params[key];
+  el.addEventListener("change", () => { params[key] = el.checked; scheduleRebuild(); });
+}
+
+bindRange("columnR", "columnR");
+bindRange("height", "height", { decimals: 1 });
+bindRange("railR", "railR");
+bindRange("railCapR", "railCapR", { decimals: 3 });
+bindRange("railTurns", "railTurns", { decimals: 1 });
+bindRange("railSegs", "railSegs", { decimals: 0 });
+bindCheckbox("railSpinOn", "railSpinOn");
+bindRange("railSpeed", "railSpeed", { decimals: 1, live: true });
+bindRange("postCount", "postCount", { decimals: 0 });
+bindRange("postR", "postR");
+bindRange("postCapR", "postCapR", { decimals: 3 });
+bindCheckbox("postSpinOn", "postSpinOn");
+bindRange("postSpeed", "postSpeed", { decimals: 1, live: true });
+bindRange("bowlR", "bowlR", { decimals: 1 });
+bindRange("bowlDepth", "bowlDepth");
+bindRange("marbleCount", "marbleCount", { decimals: 0 });
+bindRange("marbleFriction", "marbleFriction");
+bindRange("marbleRestitution", "marbleRestitution");
+bindRange("contactHertz", "contactHertz", { decimals: 0 });
+bindRange("contactDamping", "contactDamping", { decimals: 1 });
+bindRange("railFriction", "railFriction");
+
+// The two "spin on/off" checkboxes toggle body TYPE (static <-> kinematic),
+// which box3d has no live setter for -- so unlike speed, toggling spin on/off
+// goes through bindCheckbox's rebuild path above, not a live update.
+
+$("resetMarbles").addEventListener("click", spawnMarbles);
+$("rebuildBtn").addEventListener("click", rebuildAll);
+
+let paused = false;
+const pauseBtn = $("pauseBtn");
+pauseBtn.addEventListener("click", () => {
+  paused = !paused;
+  pauseBtn.textContent = paused ? "Resume" : "Pause";
+});
+
+function updateStats() {
+  $("stats").textContent = `${marbles.length} marbles`;
+}
+
+// =============================================================================
+// Main loop
+// =============================================================================
+const PHYSICS_DT = 1 / 60;
+let accumulator = 0;
+let lastT = performance.now() / 1000;
+function animate() {
+  requestAnimationFrame(animate);
+  const now = performance.now() / 1000;
+  const frameTime = Math.min(now - lastT, 0.25);
+  lastT = now;
+
+  if (!paused && world) {
+    accumulator += frameTime;
+    while (accumulator >= PHYSICS_DT) {
+      world.step(PHYSICS_DT, 8);
+      accumulator -= PHYSICS_DT;
+    }
+    if (railGroup && railBody) {
+      const p = railBody.getPosition(), r = railBody.getRotation();
+      railGroup.position.set(p.x, p.y, p.z);
+      railGroup.quaternion.set(r.x, r.y, r.z, r.w);
+    }
+    if (postsGroup && postsBody) {
+      const p = postsBody.getPosition(), r = postsBody.getRotation();
+      postsGroup.position.set(p.x, p.y, p.z);
+      postsGroup.quaternion.set(r.x, r.y, r.z, r.w);
+    }
+    for (const m of marbles) {
+      const p = m.body.getPosition(), r = m.body.getRotation();
+      m.mesh.position.set(p.x, p.y, p.z);
+      m.mesh.quaternion.set(r.x, r.y, r.z, r.w);
+    }
+  }
+  renderer.render(scene, camera);
+}
+
+rebuildAll();
+animate();
+</script>
+</body>
+</html>

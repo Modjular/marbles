@@ -63,25 +63,18 @@ function buildEnvironment3D() {
 }
 scene3d.environment = buildEnvironment3D();
 
-// ---- Desk placeholder ----
-// A wood surface floating in the skybox, repositioned each rebuild (see
-// updateDeskVisual) to sit one unit below the track's last node.
+// ---- Desk / floor ----
+// The floor is no longer a flat plane: it's the cone that funnels marbles into the
+// Archimedes-screw lift, built (visual + collider) by corkscrew.js and dropped into
+// machineGroup below. All this module still owns is the desk's size (which sets the
+// cone's radius) and the rule for where its rim sits -- one unit below the track's
+// last node. updateDeskVisual just reports that rim height so the caller can rebuild
+// the machine there; it does no early-out (main.js updateRoomAndDesk owns the
+// "anchor unchanged" skip).
 const DESK_SIZE = 26;
-export const deskMesh = new THREE.Mesh(new THREE.PlaneGeometry(DESK_SIZE, DESK_SIZE), DESK_MATERIAL);
-deskMesh.rotation.x = -Math.PI / 2;
-scene3d.add(deskMesh);
-export const deskGrid = new THREE.GridHelper(DESK_SIZE, DESK_SIZE / 2, 0x8a7256, 0xc4b49a);
-scene3d.add(deskGrid);
 export const DESK_HALF = DESK_SIZE / 2;
-
-// Positions the desk visuals under `anchor`; returns the desk's Y so the caller
-// can place the matching physics floor. Does not early-out -- the caller
-// (main.js updateRoomAndDesk) owns the "anchor unchanged" skip.
 export function updateDeskVisual(anchor) {
-  const deskY = anchor.y - 1;
-  deskMesh.position.set(anchor.x, deskY, anchor.z);
-  deskGrid.position.set(anchor.x, deskY + 0.003, anchor.z);
-  return deskY;
+  return anchor.y - 1;
 }
 
 // ---- Optional remote placeholder textures ----
@@ -125,6 +118,9 @@ export const trackMeshGroup = new THREE.Group();
 scene3d.add(trackMeshGroup);
 export const colliderDebugGroup = new THREE.Group();
 scene3d.add(colliderDebugGroup);
+// The Archimedes-screw lift + its cone floor (corkscrew.js draws into this).
+export const machineGroup = new THREE.Group();
+scene3d.add(machineGroup);
 export const marbleGroup = new THREE.Group();
 scene3d.add(marbleGroup);
 

@@ -11,7 +11,8 @@ import Box3D from "box3d-wasm";
 import { config } from "./config.js";
 import { WORLD_UP } from "./track.js";
 import { MARBLE_R, MARBLE_MATERIAL, MARBLE_GEOMETRY, COLLIDER_DEBUG_MATERIAL } from "./materials.js";
-import { marbleGroup, colliderDebugGroup, DESK_HALF } from "./scene3d.js";
+import { marbleGroup, colliderDebugGroup, machineGroup, DESK_HALF } from "./scene3d.js";
+import * as machine from "./corkscrew.js";
 import { hooks } from "./bus.js";
 
 // box3d-wasm is async (it instantiates the wasm module). Top-level await here means
@@ -61,19 +62,20 @@ export function rebuildColliders(railMeshesBySide) {
   }
 }
 
-// ---- Desk floor collider ----
-let floorBody = null;
+// ---- Cone floor + Archimedes-screw lift ----
+// The old flat box floor is gone; the floor is now the cone that funnels marbles
+// into the screw lift, and both the cone and the lift are built together by
+// corkscrew.js (colliders into this world, meshes into machineGroup). Centred
+// under the track's last node, rim at deskY.
 let lastFloorAnchor = null;
 export function updateFloor(anchor, deskY) {
   // Bank-handle drags rebuild the track (and call this) every pointermove even
   // though the anchor never moves during that interaction -- skip the
-  // destroy/recreate of the floor body when the anchor is unchanged, rather than
+  // destroy/recreate of the machine when the anchor is unchanged, rather than
   // hammering the WASM boundary and disturbing anything resting on it.
   if (lastFloorAnchor && lastFloorAnchor.distanceToSquared(anchor) < 1e-10) return;
   lastFloorAnchor = anchor.clone();
-  if (floorBody) floorBody.destroy();
-  floorBody = physicsWorld.createBody({ type: "static", position: { x: anchor.x, y: deskY - 0.25, z: anchor.z } });
-  floorBody.createBox({ halfExtents: { x: DESK_HALF, y: 0.25, z: DESK_HALF }, friction: 0.4, restitution: 0.05 });
+  machine.rebuild(physicsWorld, machineGroup, anchor.x, anchor.z, deskY, DESK_HALF);
 }
 
 // ---- World rebuild (contact-tuning changes) ----
@@ -94,7 +96,7 @@ export function recreatePhysicsWorld() {
   stopSim(); // clears marbles and (via cancelRecording) aborts any capture
   for (const body of colliderBodies) body.destroy();
   colliderBodies = [];
-  if (floorBody) { floorBody.destroy(); floorBody = null; }
+  machine.destroy(); // frees the lift's mesh-shape data before the world goes (see corkscrew.js)
   physicsWorld.destroy();
   physicsWorld = new b3.World(makeWorldDef());
   lastFloorAnchor = null; // force updateFloor to recreate the floor against the new world
@@ -213,4 +215,5 @@ export function tick(frameTime) {
     m.mesh.position.set(p.x, p.y, p.z);
     m.mesh.quaternion.set(r.x, r.y, r.z, r.w);
   }
+  machine.tick(); // sync the spinning lift paddles to their kinematic body
 }
