@@ -18,7 +18,7 @@ canvas { display: block; width: 100%; height: 100%; touch-action: none; }
   padding: 14px 18px;
   box-shadow: 0 6px 28px rgba(0,0,0,0.25), 0 2px 8px rgba(0,0,0,0.12);
   z-index: 100;
-  min-width: 180px;
+  min-width: 190px;
   transform: translate(-50%, -100%) translateY(-18px);
   user-select: none;
   -webkit-user-select: none;
@@ -41,49 +41,22 @@ canvas { display: block; width: 100%; height: 100%; touch-action: none; }
   color: #333;
   margin-bottom: 8px;
 }
-.node-card .bank-row {
+.node-card .dial-wrap {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 10px;
+  gap: 4px;
+  margin-top: 4px;
 }
-.node-card .bank-row label {
-  font-size: 12px;
-  color: #666;
-  white-space: nowrap;
-}
-.node-card .bank-slider {
-  flex: 1;
-  -webkit-appearance: none;
-  appearance: none;
-  height: 6px;
-  border-radius: 3px;
-  background: linear-gradient(90deg, #4a9eff 0%, #e0e0e0 50%, #ff6b4a 100%);
-  outline: none;
-  min-width: 90px;
-}
-.node-card .bank-slider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  width: 22px; height: 22px;
-  border-radius: 50%;
-  background: #fff;
-  border: 2px solid #4a9eff;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+.node-card .dial-wrap svg {
   cursor: grab;
-}
-.node-card .bank-slider::-moz-range-thumb {
-  width: 22px; height: 22px;
-  border-radius: 50%;
-  background: #fff;
-  border: 2px solid #4a9eff;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.2);
-  cursor: grab;
+  touch-action: none;
 }
 .node-card .bank-value {
-  font-size: 12px;
+  font-size: 13px;
+  font-weight: 600;
   color: #333;
   font-variant-numeric: tabular-nums;
-  min-width: 36px;
-  text-align: right;
 }
 #ui-overlay {
   position: absolute;
@@ -102,11 +75,35 @@ canvas { display: block; width: 100%; height: 100%; touch-action: none; }
   pointer-events: none;
   transition: opacity 0.5s;
 }
+#spawn-btn {
+  position: absolute;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  width: 52px; height: 52px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255,255,255,0.92);
+  backdrop-filter: blur(6px);
+  box-shadow: 0 3px 14px rgba(0,0,0,0.18), 0 1px 4px rgba(0,0,0,0.1);
+  cursor: pointer;
+  font-size: 28px;
+  line-height: 52px;
+  color: #555;
+  transition: transform 0.1s, box-shadow 0.1s;
+  -webkit-tap-highlight-color: transparent;
+}
+#spawn-btn:active {
+  transform: translateX(-50%) scale(0.92);
+  box-shadow: 0 1px 6px rgba(0,0,0,0.15);
+}
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
 <div id="ui-overlay"></div>
+<button id="spawn-btn">+</button>
 <div id="hint">tap a node to adjust banking</div>
 
 <script type="importmap">
@@ -131,12 +128,13 @@ const NUM_NODES = 12;
 const ELEVATION_PER_NODE = 0.35;
 const SAMPLES_PER_SEG = 28;
 const MAX_MARBLES = 16;
-const SPAWN_INTERVAL = 1.8;
 const SPAWN_KICK = 1.2;
 const PHYSICS_DT = 1 / 60;
 const GROUND_Y = -(NUM_NODES - 1) * ELEVATION_PER_NODE - 1.5;
-const MARBLE_EXPIRE_TIME = 3.0;
+const MARBLE_EXPIRE_TIME = 2.0;
+const MARBLE_FLASH_DURATION = 0.25;
 const NODE_HIT_RADIUS_SCREEN = 28; // pixels, generous for touch
+const FLASH_COLOR = new THREE.Color(0xffee55);
 
 // ---- Renderer + Scene ----
 const canvas = document.getElementById("c");
@@ -260,6 +258,11 @@ function generateRandomTrack() {
       elevTangent: 0, elevAuto: true,
     });
   }
+  // Center the track on the canvas origin
+  let avgX = 0, avgZ = 0;
+  for (const nd of splineNodes) { avgX += nd.x; avgZ += nd.z; }
+  avgX /= splineNodes.length; avgZ /= splineNodes.length;
+  for (const nd of splineNodes) { nd.x -= avgX; nd.z -= avgZ; }
   recomputeAutoTangents();
   recomputeElevTangents();
 }
@@ -459,14 +462,12 @@ function rebuildGround() {
 }
 
 // ---- Marbles ----
-let liveMarbles = []; // { body, mesh, age, offTrack, passedNodes: Set }
-let spawnTimer = 0;
+let liveMarbles = [];
 let physicsAccumulator = 0;
 let latestNodeMarkers = [];
 let latestPathPoints = [];
 let latestNodePathIndex = [];
-// Track the path-index boundaries for each node
-let nodeSegmentBounds = []; // per node i: { startIdx, endIdx } in pathPoints
+let nodeSegmentBounds = [];
 
 function spawnMarble() {
   if (latestNodeMarkers.length === 0) return;
@@ -474,6 +475,7 @@ function spawnMarble() {
     const old = liveMarbles.shift();
     old.body.destroy();
     marbleGroup.remove(old.mesh);
+    old.mesh.material.dispose();
   }
   const sp = latestNodeMarkers[0].clone();
   sp.y += MARBLE_R * 1.5;
@@ -491,13 +493,19 @@ function spawnMarble() {
   const mat = marbleMat.clone();
   const hue = Math.random();
   mat.color.setHSL(hue, 0.15, 0.85);
+  const baseColor = mat.color.clone();
   const mesh = new THREE.Mesh(marbleGeo, mat);
   marbleGroup.add(mesh);
-  liveMarbles.push({ body, mesh, age: 0, offTrack: false, expireTimer: 0, passedNodes: new Set([0]), lastClosestNode: 0 });
+  liveMarbles.push({
+    body, mesh, baseColor, age: 0,
+    offTrack: false, reachedEnd: false,
+    expireTimer: 0, flashTimer: 0,
+    passedNodes: new Set([0]), lastClosestNode: 0,
+  });
 }
 
 function clearMarbles() {
-  for (const m of liveMarbles) { m.body.destroy(); marbleGroup.remove(m.mesh); }
+  for (const m of liveMarbles) { m.body.destroy(); marbleGroup.remove(m.mesh); m.mesh.material.dispose(); }
   liveMarbles = [];
 }
 
@@ -673,32 +681,108 @@ function openNodeCard(idx) {
   const isLast = idx === splineNodes.length - 1;
   const isFirst = idx === 0;
 
+  const DIAL_R = 58, DIAL_CX = 70, DIAL_CY = 64;
+  const DIAL_W = 140, DIAL_H = 78;
+
   cardEl = document.createElement("div");
   cardEl.className = "node-card";
-  cardEl.innerHTML = `
-    <div class="card-title">Node ${idx + 1}${isFirst ? " (start)" : ""}${isLast ? " (end)" : ""}</div>
-    <div class="bank-row">
-      <label>Bank</label>
-      <input type="range" class="bank-slider" min="-1.57" max="1.57" step="0.01" value="${node.bank}" />
-      <span class="bank-value">${(node.bank * 180 / Math.PI).toFixed(0)}&deg;</span>
-    </div>
-  `;
+
+  const degVal = (node.bank * 180 / Math.PI).toFixed(0);
+  let svgHTML = `<div class="card-title">Node ${idx + 1}${isFirst ? " (start)" : ""}${isLast ? " (end)" : ""}</div>`;
+  svgHTML += `<div class="dial-wrap">`;
+  svgHTML += `<svg width="${DIAL_W}" height="${DIAL_H}" viewBox="0 0 ${DIAL_W} ${DIAL_H}">`;
+
+  // Arc track
+  svgHTML += `<path d="M ${DIAL_CX - DIAL_R} ${DIAL_CY} A ${DIAL_R} ${DIAL_R} 0 0 1 ${DIAL_CX + DIAL_R} ${DIAL_CY}" fill="none" stroke="#e0e0e0" stroke-width="4" stroke-linecap="round"/>`;
+
+  // Tick marks every 15 degrees
+  for (let deg = -90; deg <= 90; deg += 15) {
+    const rad = (deg - 90) * Math.PI / 180;
+    const isMajor = deg % 45 === 0;
+    const inner = DIAL_R - (isMajor ? 10 : 6);
+    const outer = DIAL_R + 1;
+    const x1 = DIAL_CX + Math.cos(rad) * inner;
+    const y1 = DIAL_CY + Math.sin(rad) * inner;
+    const x2 = DIAL_CX + Math.cos(rad) * outer;
+    const y2 = DIAL_CY + Math.sin(rad) * outer;
+    svgHTML += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${isMajor ? '#999' : '#ccc'}" stroke-width="${isMajor ? 1.5 : 1}"/>`;
+  }
+
+  // Degree labels at -90, 0, +90
+  svgHTML += `<text x="${DIAL_CX - DIAL_R - 4}" y="${DIAL_CY + 14}" font-size="9" fill="#999" text-anchor="end">&minus;90</text>`;
+  svgHTML += `<text x="${DIAL_CX}" y="${DIAL_CY - DIAL_R + 2}" font-size="9" fill="#999" text-anchor="middle">0</text>`;
+  svgHTML += `<text x="${DIAL_CX + DIAL_R + 4}" y="${DIAL_CY + 14}" font-size="9" fill="#999" text-anchor="start">+90</text>`;
+
+  // Needle + knob (updated dynamically)
+  svgHTML += `<line class="dial-needle" stroke="#4a9eff" stroke-width="2.5" stroke-linecap="round"/>`;
+  svgHTML += `<circle class="dial-knob" r="8" fill="#fff" stroke="#4a9eff" stroke-width="2" style="filter: drop-shadow(0 1px 2px rgba(0,0,0,0.15))"/>`;
+
+  svgHTML += `</svg>`;
+  svgHTML += `<span class="bank-value">${degVal}&deg;</span>`;
+  svgHTML += `</div>`;
+
+  cardEl.innerHTML = svgHTML;
   overlay.appendChild(cardEl);
 
-  const slider = cardEl.querySelector(".bank-slider");
+  const svgEl = cardEl.querySelector("svg");
+  const needle = cardEl.querySelector(".dial-needle");
+  const knob = cardEl.querySelector(".dial-knob");
   const valSpan = cardEl.querySelector(".bank-value");
 
-  const onInput = (e) => {
-    e.stopPropagation();
-    const v = parseFloat(slider.value);
+  function setNeedle(bankRad) {
+    const clamped = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, bankRad));
+    const angle = (clamped - Math.PI / 2);
+    const nx = DIAL_CX + Math.cos(angle) * (DIAL_R - 16);
+    const ny = DIAL_CY + Math.sin(angle) * (DIAL_R - 16);
+    const kx = DIAL_CX + Math.cos(angle) * DIAL_R;
+    const ky = DIAL_CY + Math.sin(angle) * DIAL_R;
+    needle.setAttribute("x1", DIAL_CX);
+    needle.setAttribute("y1", DIAL_CY);
+    needle.setAttribute("x2", nx);
+    needle.setAttribute("y2", ny);
+    knob.setAttribute("cx", kx);
+    knob.setAttribute("cy", ky);
+  }
+  setNeedle(node.bank);
+
+  // Drag interaction on the SVG
+  let dragging = false;
+
+  function bankFromPointer(clientX, clientY) {
+    const rect = svgEl.getBoundingClientRect();
+    const sx = (clientX - rect.left) / rect.width * DIAL_W;
+    const sy = (clientY - rect.top) / rect.height * DIAL_H;
+    const dx = sx - DIAL_CX, dy = sy - DIAL_CY;
+    let angle = Math.atan2(dy, dx);
+    let bank = angle + Math.PI / 2;
+    return Math.max(-Math.PI / 2, Math.min(Math.PI / 2, bank));
+  }
+
+  function onDrag(clientX, clientY) {
+    const v = bankFromPointer(clientX, clientY);
     node.bank = v;
+    setNeedle(v);
     valSpan.textContent = (v * 180 / Math.PI).toFixed(0) + "°";
     fullRebuild({ recenterCamera: false });
     positionCard(idx);
-  };
-  slider.addEventListener("input", onInput);
-  slider.addEventListener("pointerdown", (e) => e.stopPropagation());
-  slider.addEventListener("touchstart", (e) => e.stopPropagation(), { passive: true });
+  }
+
+  svgEl.addEventListener("pointerdown", (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    dragging = true;
+    svgEl.setPointerCapture(e.pointerId);
+    onDrag(e.clientX, e.clientY);
+  });
+
+  svgEl.addEventListener("pointermove", (e) => {
+    if (!dragging) return;
+    e.preventDefault();
+    onDrag(e.clientX, e.clientY);
+  });
+
+  svgEl.addEventListener("pointerup", () => { dragging = false; });
+  svgEl.addEventListener("pointercancel", () => { dragging = false; });
 
   // Prevent card interactions from bubbling to canvas
   cardEl.addEventListener("pointerdown", (e) => e.stopPropagation());
@@ -857,23 +941,12 @@ function findClosestNodeToMarble(pos) {
 
 // ---- Animation loop ----
 let lastTime = performance.now() / 1000;
-let running = true;
-spawnTimer = SPAWN_INTERVAL - 0.5; // spawn first marble quickly
 
 function animate() {
   requestAnimationFrame(animate);
   const now = performance.now() / 1000;
   const dt = Math.min(now - lastTime, 0.25);
   lastTime = now;
-
-  if (!running) { renderer.render(scene, camera); return; }
-
-  // Spawn
-  spawnTimer += dt;
-  while (spawnTimer >= SPAWN_INTERVAL) {
-    spawnTimer -= SPAWN_INTERVAL;
-    spawnMarble();
-  }
 
   // Physics
   physicsAccumulator += dt;
@@ -891,19 +964,26 @@ function animate() {
     m.mesh.quaternion.set(r.x, r.y, r.z, r.w);
     m.age += dt;
 
+    // Flash color decay
+    if (m.flashTimer > 0) {
+      m.flashTimer = Math.max(0, m.flashTimer - dt);
+      const t = m.flashTimer / MARBLE_FLASH_DURATION;
+      m.mesh.material.color.copy(m.baseColor).lerp(FLASH_COLOR, t);
+      m.mesh.material.emissive.copy(FLASH_COLOR).multiplyScalar(t * 0.4);
+    }
+
     const mpos = new THREE.Vector3(p.x, p.y, p.z);
 
-    // Check node passing: find the closest node and see if we've advanced
+    // Node passing detection
     const { idx: closestNode, dist: closestDist } = findClosestNodeToMarble(mpos);
     if (closestNode >= 0 && closestDist < MARBLE_R * 8) {
-      // Check if marble passed through nodes it hadn't before
-      // We consider a marble "passed" a node if it's the closest and not previously passed
       if (!m.passedNodes.has(closestNode) && closestNode > m.lastClosestNode) {
-        // Mark all nodes between lastClosestNode+1 and closestNode as passed
         for (let ni = m.lastClosestNode + 1; ni <= closestNode; ni++) {
           if (!m.passedNodes.has(ni)) {
             m.passedNodes.add(ni);
+            m.flashTimer = MARBLE_FLASH_DURATION;
             if (ni === splineNodes.length - 1) {
+              m.reachedEnd = true;
               playFinale();
             } else {
               playChime(ni);
@@ -914,42 +994,36 @@ function animate() {
       }
     }
 
-    // Check if marble hit the ground or fell far
-    const hitGround = p.y <= GROUND_Y + MARBLE_R + 0.1;
+    // Ground hit or fell far
+    const hitGround = p.y <= GROUND_Y + MARBLE_R + 0.15;
     const fellFar = p.y < GROUND_Y - 2;
 
-    if (hitGround && !m.offTrack) {
+    if ((hitGround || fellFar) && !m.offTrack) {
       m.offTrack = true;
       m.expireTimer = 0;
-      // Only crunch if it didn't reach the last node
-      if (!m.passedNodes.has(splineNodes.length - 1)) {
+      if (!m.reachedEnd) {
         playCrunch();
       }
     }
 
-    if (m.offTrack || fellFar) {
-      m.expireTimer += dt;
-      // Fade out
-      const fade = 1 - Math.min(m.expireTimer / MARBLE_EXPIRE_TIME, 1);
-      m.mesh.material.opacity = fade;
-      m.mesh.material.transparent = true;
-      if (m.expireTimer >= MARBLE_EXPIRE_TIME) {
-        toRemove.push(mi);
-      }
-    }
-
-    // Also expire if marble has gone far off the track horizontally
+    // Horizontal drift off canvas
     const horizDist = Math.hypot(p.x - camTarget.x, p.z - camTarget.z);
     if (horizDist > CANVAS_HALF && !m.offTrack) {
       m.offTrack = true;
       m.expireTimer = 0;
-      if (!m.passedNodes.has(splineNodes.length - 1)) {
-        playCrunch();
-      }
+      if (!m.reachedEnd) playCrunch();
+    }
+
+    // Fade out once off-track
+    if (m.offTrack) {
+      m.expireTimer += dt;
+      const fade = 1 - Math.min(m.expireTimer / MARBLE_EXPIRE_TIME, 1);
+      m.mesh.material.opacity = fade;
+      m.mesh.material.transparent = true;
+      if (m.expireTimer >= MARBLE_EXPIRE_TIME) toRemove.push(mi);
     }
   }
 
-  // Remove expired marbles (reverse order)
   for (let i = toRemove.length - 1; i >= 0; i--) {
     const mi = toRemove[i];
     const m = liveMarbles[mi];
@@ -959,23 +1033,19 @@ function animate() {
     liveMarbles.splice(mi, 1);
   }
 
-  // Update card position if open
   if (openCardIndex >= 0) positionCard(openCardIndex);
 
   renderer.render(scene, camera);
 }
 
 // ---- Init ----
-// Resume audio on first interaction
-let audioStarted = false;
-function startAudioOnGesture() {
-  if (audioStarted) return;
-  audioStarted = true;
+// Spawn button
+document.getElementById("spawn-btn").addEventListener("pointerdown", (e) => {
+  e.stopPropagation();
   ensureAudio();
   if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
-}
-canvas.addEventListener("pointerdown", startAudioOnGesture, { once: false });
-canvas.addEventListener("touchstart", startAudioOnGesture, { once: false, passive: true });
+  spawnMarble();
+});
 
 // Hide hint after first tap
 canvas.addEventListener("pointerdown", () => {
