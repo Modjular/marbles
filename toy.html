@@ -124,7 +124,7 @@ const CANVAS_HALF = 64 * MARBLE_R; // 64R x 64R world
 const RAIL_RADIUS = 0.045;
 const RAIL_GAUGE = 0.26;
 const RAIL_RADIAL_SEGS = 10;
-const NUM_NODES = 12;
+const NUM_NODES = 8;
 const ELEVATION_PER_NODE = 0.35;
 const SAMPLES_PER_SEG = 28;
 const MAX_MARBLES = 16;
@@ -263,6 +263,48 @@ function generateRandomTrack() {
   for (const nd of splineNodes) { avgX += nd.x; avgZ += nd.z; }
   avgX /= splineNodes.length; avgZ /= splineNodes.length;
   for (const nd of splineNodes) { nd.x -= avgX; nd.z -= avgZ; }
+  recomputeAutoTangents();
+  recomputeElevTangents();
+}
+
+function generateSmoothNoiseTrack() {
+  splineNodes = [];
+  
+  // Randomize phase offsets each generation for infinite variety
+  const phaseA = Math.random() * 10;
+  const phaseB = Math.random() * 10;
+  
+  let currentAngle = Math.random() * Math.PI * 2;
+  let cx = 0, cz = 0;
+
+  for (let i = 0; i < NUM_NODES; i++) {
+    if (i > 0) {
+      // Low-frequency sine wave + high-frequency sine wave = organic curvature
+      const curvature = Math.sin(i * 0.15 + phaseA) * 0.8 + 
+                        Math.sin(i * 0.05 + phaseB) * 0.3;
+      
+      currentAngle += curvature;
+      const stride = 1.8 + Math.sin(i * 0.2) * 0.4;
+      
+      cx += Math.cos(currentAngle) * stride;
+      cz += Math.sin(currentAngle) * stride;
+    }
+
+    splineNodes.push({
+      x: cx, z: cz,
+      hx: 0, hz: 0, auto: true,
+      bank: 0,
+      elev: -i * ELEVATION_PER_NODE,
+      elevTangent: 0, elevAuto: true,
+    });
+  }
+
+  // Center track
+  let avgX = 0, avgZ = 0;
+  for (const nd of splineNodes) { avgX += nd.x; avgZ += nd.z; }
+  avgX /= splineNodes.length; avgZ /= splineNodes.length;
+  for (const nd of splineNodes) { nd.x -= avgX; nd.z -= avgZ; }
+
   recomputeAutoTangents();
   recomputeElevTangents();
 }
@@ -562,7 +604,8 @@ function playFinale() {
   const t = ctx.currentTime;
 
   // rich resonant ding: fundamental + harmonics
-  const freqs = [440, 880, 1320, 1760];
+  const pitchShift = 1.5; 
+  const freqs = [440, 880, 1320, 1760].map(f => f * pitchShift);
   const gains = [0.2, 0.12, 0.06, 0.03];
   for (let i = 0; i < freqs.length; i++) {
     const osc = ctx.createOscillator();
@@ -976,7 +1019,7 @@ function animate() {
 
     // Node passing detection
     const { idx: closestNode, dist: closestDist } = findClosestNodeToMarble(mpos);
-    if (closestNode >= 0 && closestDist < MARBLE_R * 8) {
+    if (closestNode >= 0 && closestDist < MARBLE_R * 2) {
       if (!m.passedNodes.has(closestNode) && closestNode > m.lastClosestNode) {
         for (let ni = m.lastClosestNode + 1; ni <= closestNode; ni++) {
           if (!m.passedNodes.has(ni)) {
@@ -1053,7 +1096,8 @@ canvas.addEventListener("pointerdown", () => {
   if (hint) hint.style.opacity = "0";
 }, { once: true });
 
-generateRandomTrack();
+// generateRandomTrack();
+generateSmoothNoiseTrack();
 fullRebuild();
 animate();
 
