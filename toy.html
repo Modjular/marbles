@@ -14,7 +14,7 @@ canvas { display: block; width: 100%; height: 100%; touch-action: none; }
   pointer-events: auto;
   background: rgba(255,255,255,0.95);
   backdrop-filter: blur(8px);
-  border-radius: 14px;
+  border-radius: 8px;
   padding: 14px 18px;
   box-shadow: 0 6px 28px rgba(0,0,0,0.25), 0 2px 8px rgba(0,0,0,0.12);
   z-index: 100;
@@ -124,7 +124,7 @@ const CANVAS_HALF = 64 * MARBLE_R; // 64R x 64R world
 const RAIL_RADIUS = 0.045;
 const RAIL_GAUGE = 0.26;
 const RAIL_RADIAL_SEGS = 10;
-const NUM_NODES = 8;
+const NUM_NODES = 16;
 const ELEVATION_PER_NODE = 0.35;
 const SAMPLES_PER_SEG = 28;
 const MAX_MARBLES = 16;
@@ -566,10 +566,12 @@ const CHIME_FREQS = [
   783.99, 880.00, 987.77, 1046.50, 1174.66, 1318.51,
 ];
 
-function playChime(nodeIndex) {
+function playChime(nodeIndex, baseFreq = 261.63) {
   const ctx = ensureAudio();
   if (ctx.state === "suspended") ctx.resume();
-  const freq = CHIME_FREQS[nodeIndex % CHIME_FREQS.length];
+
+  // Calculate frequency based on semitone steps from baseFreq (piano tuning)
+  const freq = baseFreq * Math.pow(2, nodeIndex / 12);
   const t = ctx.currentTime;
 
   const osc = ctx.createOscillator();
@@ -1027,7 +1029,8 @@ function animate() {
             m.flashTimer = MARBLE_FLASH_DURATION;
             if (ni === splineNodes.length - 1) {
               m.reachedEnd = true;
-              playFinale();
+              const nextOctave = ni + (8 - ni % 8)
+              playChime(nextOctave)
             } else {
               playChime(ni);
             }
