@@ -470,8 +470,8 @@ let physicsWorld = new b3.World({
   gravity: { x: 0, y: -9.8, z: 0 },
   enableSleep: false,
   enableContinuous: true,
-  contactHertz: 7,
-  contactDampingRatio: 6,
+  contactHertz: 30,
+  contactDampingRatio: 1,
 });
 
 let colliderBodies = [];
@@ -486,7 +486,7 @@ function rebuildColliders(railData) {
       vertices[i] = { x: positions[i*3], y: positions[i*3+1], z: positions[i*3+2] };
     }
     const body = physicsWorld.createBody({ type: "static" });
-    body.createMesh({ vertices, indices, friction: 0.2, restitution: 0 });
+    body.createMesh({ vertices, indices, friction: 0.10, restitution: 0.05 });
     colliderBodies.push(body);
   }
 }
