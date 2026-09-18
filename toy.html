@@ -183,7 +183,7 @@ let camZoom = 1.2;
 const camTarget = new THREE.Vector3(0, -1.5, 0);
 const camera = new THREE.OrthographicCamera(-viewSize, viewSize, viewSize, -viewSize, 0.01, 200);
 
-const ISO_ANGLE = Math.PI / 4;
+let ISO_ANGLE = Math.PI / 4;
 const ISO_ELEV = Math.atan(1 / Math.sqrt(2)); // ~35.26 degrees, true isometric
 
 function updateCamera() {
@@ -212,6 +212,11 @@ function resize() {
 window.addEventListener("resize", resize);
 resize();
 updateCamera();
+
+window.addEventListener("keydown", (e) => {
+  if (e.key === "ArrowLeft") { ISO_ANGLE -= Math.PI / 2; updateCamera(); }
+  else if (e.key === "ArrowRight") { ISO_ANGLE += Math.PI / 2; updateCamera(); }
+});
 
 // ---- Materials ----
 const railMat = new THREE.MeshStandardMaterial({ color: 0xb9bec7, metalness: 1.0, roughness: 0.14, side: THREE.DoubleSide });
