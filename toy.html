@@ -223,6 +223,8 @@ const railMat = new THREE.MeshStandardMaterial({ color: 0xb9bec7, metalness: 1.0
 const marbleMat = new THREE.MeshStandardMaterial({ color: 0xf0e6d3, metalness: 0.6, roughness: 0.25 });
 const marbleGeo = new THREE.SphereGeometry(MARBLE_R, 24, 16);
 const groundMat = new THREE.MeshStandardMaterial({ color: 0xcec5b4, roughness: 0.9, metalness: 0.0 });
+const poleMat = new THREE.MeshStandardMaterial({ color: 0x8a8f98, metalness: 0.9, roughness: 0.35 });
+const POLE_RADIUS = 0.035;
 
 // ---- Groups ----
 const trackGroup = new THREE.Group();
@@ -231,6 +233,8 @@ const marbleGroup = new THREE.Group();
 scene.add(marbleGroup);
 const nodeMarkerGroup = new THREE.Group();
 scene.add(nodeMarkerGroup);
+const poleGroup = new THREE.Group();
+scene.add(poleGroup);
 
 // Ground plane
 const groundGeo = new THREE.PlaneGeometry(CANVAS_HALF * 2, CANVAS_HALF * 2);
@@ -667,6 +671,10 @@ function fullRebuild({ recenterCamera = true } = {}) {
   }
   while (nodeMarkerGroup.children.length) nodeMarkerGroup.remove(nodeMarkerGroup.children[0]);
   nodeMarkerMeshes = [];
+  while (poleGroup.children.length) {
+    const c = poleGroup.children.pop();
+    c.geometry.dispose();
+  }
 
   const { pathPoints, nodeMarkers, bankPerPoint, nodePathIndex } = buildTrack3D();
   latestPathPoints = pathPoints;
@@ -706,6 +714,15 @@ function fullRebuild({ recenterCamera = true } = {}) {
     m.userData.nodeIndex = i;
     nodeMarkerGroup.add(m);
     nodeMarkerMeshes.push(m);
+
+    // Purely aesthetic support pole, straight down to the ground -- no collider.
+    const height = nodeMarkers[i].y - GROUND_Y;
+    if (height > 0.01) {
+      const poleGeo = new THREE.CylinderGeometry(POLE_RADIUS, POLE_RADIUS, height, 8);
+      const pole = new THREE.Mesh(poleGeo, poleMat);
+      pole.position.set(nodeMarkers[i].x, GROUND_Y + height / 2, nodeMarkers[i].z);
+      poleGroup.add(pole);
+    }
   }
 
   rebuildGround();
