@@ -181,6 +181,9 @@ scene.environment = buildEnvMap();
 const viewSize = 4;
 let camZoom = 1.2;
 const camTarget = new THREE.Vector3(0, -1.5, 0);
+// Fixed board center, independent of camTarget (which the user pans around) --
+// used for the off-track distance check so panning never affects it.
+const trackCenter = new THREE.Vector3(0, -1.5, 0);
 const camera = new THREE.OrthographicCamera(-viewSize, viewSize, viewSize, -viewSize, 0.01, 200);
 
 let ISO_ANGLE = Math.PI / 4;
@@ -727,12 +730,15 @@ function fullRebuild({ recenterCamera = true } = {}) {
 
   rebuildGround();
 
-  if (recenterCamera && pathPoints.length > 0) {
+  if (pathPoints.length > 0) {
     const c = new THREE.Vector3();
     for (const p of pathPoints) c.add(p);
     c.multiplyScalar(1 / pathPoints.length);
-    camTarget.copy(c);
-    updateCamera();
+    trackCenter.copy(c);
+    if (recenterCamera) {
+      camTarget.copy(c);
+      updateCamera();
+    }
   }
 }
 
@@ -1075,7 +1081,7 @@ function animate() {
     }
 
     // Horizontal drift off canvas
-    const horizDist = Math.hypot(p.x - camTarget.x, p.z - camTarget.z);
+    const horizDist = Math.hypot(p.x - trackCenter.x, p.z - trackCenter.z);
     if (horizDist > CANVAS_HALF && !m.offTrack) {
       m.offTrack = true;
       m.expireTimer = 0;
