@@ -1,0 +1,1139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<title>marble puzzle</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #1a1a2e; font-family: system-ui, -apple-system, sans-serif; }
+canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+
+#ui-overlay {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.float-card {
+  position: absolute;
+  pointer-events: auto;
+  background: rgba(255,255,255,0.95);
+  backdrop-filter: blur(8px);
+  border-radius: 10px;
+  padding: 10px 14px;
+  box-shadow: 0 6px 28px rgba(0,0,0,0.25), 0 2px 8px rgba(0,0,0,0.12);
+  z-index: 100;
+  transform: translate(-50%, -100%) translateY(-16px);
+  user-select: none;
+  -webkit-user-select: none;
+}
+.float-card::after {
+  content: '';
+  position: absolute;
+  bottom: -8px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0; height: 0;
+  border-left: 9px solid transparent;
+  border-right: 9px solid transparent;
+  border-top: 9px solid rgba(255,255,255,0.95);
+}
+.shelf-label {
+  position: absolute;
+  pointer-events: none;
+  transform: translate(-50%, -100%);
+  background: rgba(20,20,30,0.7);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 6px;
+  white-space: nowrap;
+  z-index: 15;
+}
+
+.height-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.height-card button {
+  width: 34px; height: 34px;
+  border-radius: 50%;
+  border: none;
+  background: #4a9eff;
+  color: #fff;
+  font-size: 16px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.height-card button:active { transform: scale(0.9); }
+.height-card .h-value {
+  font-size: 13px;
+  font-weight: 600;
+  color: #333;
+  min-width: 48px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+#edit-toolbar {
+  position: absolute;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  display: none;
+  gap: 10px;
+  background: rgba(255,255,255,0.92);
+  backdrop-filter: blur(6px);
+  padding: 8px;
+  border-radius: 16px;
+  box-shadow: 0 3px 14px rgba(0,0,0,0.18);
+}
+#edit-toolbar.visible { display: flex; }
+#edit-toolbar button {
+  width: 46px; height: 46px;
+  border-radius: 50%;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  background: #eef1f5;
+  color: #444;
+}
+#edit-toolbar button:active { transform: scale(0.92); }
+#edit-confirm { background: #3ecf6b !important; color: #fff !important; }
+#edit-cancel { background: #ef4a5f !important; color: #fff !important; }
+
+#hud {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  z-index: 20;
+  background: rgba(255,255,255,0.9);
+  backdrop-filter: blur(6px);
+  padding: 8px 14px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #333;
+  box-shadow: 0 3px 14px rgba(0,0,0,0.15);
+}
+
+#play-btn {
+  position: absolute;
+  bottom: 28px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  border: none;
+  border-radius: 999px;
+  padding: 14px 32px;
+  font-size: 16px;
+  font-weight: 700;
+  color: #fff;
+  background: #3ecf6b;
+  box-shadow: 0 4px 18px rgba(0,0,0,0.25);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 0.1s, opacity 0.2s;
+}
+#play-btn:active { transform: translateX(-50%) scale(0.95); }
+#play-btn:disabled { opacity: 0.5; cursor: default; }
+
+#toast {
+  position: absolute;
+  bottom: 100px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  background: rgba(20,20,30,0.85);
+  color: #fff;
+  padding: 10px 18px;
+  border-radius: 10px;
+  font-size: 13px;
+  opacity: 0;
+  transition: opacity 0.4s;
+  pointer-events: none;
+  max-width: 80vw;
+  text-align: center;
+}
+#toast.visible { opacity: 1; }
+
+#success-modal {
+  position: absolute;
+  top: 0; left: 0; width: 100%; height: 100%;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  background: rgba(20,20,30,0.45);
+  backdrop-filter: blur(3px);
+}
+#success-modal.visible { display: flex; }
+#success-modal .panel {
+  background: #fff;
+  border-radius: 20px;
+  padding: 36px 40px;
+  text-align: center;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.35);
+}
+#success-modal h1 {
+  font-size: 26px;
+  margin-bottom: 8px;
+  color: #222;
+}
+#success-modal p {
+  font-size: 14px;
+  color: #666;
+  margin-bottom: 20px;
+}
+#new-puzzle-btn {
+  border: none;
+  border-radius: 999px;
+  padding: 12px 26px;
+  font-size: 15px;
+  font-weight: 700;
+  color: #fff;
+  background: #4a9eff;
+  cursor: pointer;
+}
+
+.confetti-piece {
+  position: fixed;
+  top: -12px;
+  z-index: 300;
+  border-radius: 2px;
+  pointer-events: none;
+  animation: confetti-fall linear forwards;
+}
+@keyframes confetti-fall {
+  0% { transform: translateY(0) rotate(0deg); opacity: 1; }
+  100% { transform: translateY(110vh) rotate(720deg); opacity: 0.85; }
+}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="ui-overlay"></div>
+<div id="hud">Delivered: 0 / 3</div>
+<div id="edit-toolbar">
+  <button id="edit-rot-ccw" title="Rotate left">&#8634;</button>
+  <button id="edit-rot-cw" title="Rotate right">&#8635;</button>
+  <button id="edit-cancel" title="Cancel">&#10005;</button>
+  <button id="edit-confirm" title="Place">&#10003;</button>
+</div>
+<button id="play-btn">&#9654; Play</button>
+<div id="toast"></div>
+<div id="success-modal">
+  <div class="panel">
+    <h1>Success!</h1>
+    <p>All marbles reached the sink.</p>
+    <button id="new-puzzle-btn">New puzzle?</button>
+  </div>
+</div>
+
+<script type="importmap">
+  { "imports": {
+    "three": "https://unpkg.com/three@0.169.0/build/three.module.js",
+    "box3d-wasm": "./wasm/entry.mjs"
+  } }
+</script>
+<script type="module">
+import * as THREE from "three";
+import Box3D from "box3d-wasm";
+
+const b3 = await Box3D();
+
+// ---- Constants ----
+const MARBLE_R = 0.18;
+const RAIL_RADIUS = 0.045;
+const RAIL_GAUGE = 0.26;
+const RAIL_RADIAL_SEGS = 10;
+const POLE_RADIUS = 0.035;
+const GRID = 1.0;
+const SLOPE_DROP = 2.4;
+const ELBOW_R = 2 * GRID;
+const PHYSICS_DT = 1 / 60;
+const MARBLE_EXPIRE_TIME = 1.1;
+const DELIVER_RADIUS = MARBLE_R * 3.5;
+const TOTAL_MARBLES = 3;
+const SPAWN_STAGGER = 0.45;
+const SPAWN_KICK = 1.2;
+
+// World point the source emits toward (fixed, matches the hand-authored level below).
+const SOURCE_POS = new THREE.Vector3(1 * GRID, 0, 0 * GRID);
+const SOURCE_HEADING = new THREE.Vector3(0, 0, 1);
+const SINK_POS = new THREE.Vector3(7 * GRID, -SLOPE_DROP, 6 * GRID);
+const FLOOR_Y = SINK_POS.y - 3;
+
+// ---- Renderer + Scene ----
+const canvas = document.getElementById("c");
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+renderer.setClearColor(0xe8e0d4);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xe8e0d4);
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0xc4b99a, 0.7));
+const dirLight = new THREE.DirectionalLight(0xfff4e0, 1.1);
+dirLight.position.set(5, 10, 4);
+scene.add(dirLight);
+const dirLight2 = new THREE.DirectionalLight(0xd0e0ff, 0.3);
+dirLight2.position.set(-4, 6, -3);
+scene.add(dirLight2);
+
+function buildEnvMap() {
+  const envScene = new THREE.Scene();
+  const geo = new THREE.SphereGeometry(40, 24, 16);
+  const posAttr = geo.getAttribute("position");
+  const colors = new Float32Array(posAttr.count * 3);
+  const top = new THREE.Color(0xffffff), bot = new THREE.Color(0xc9c2a0);
+  const tmp = new THREE.Vector3();
+  for (let i = 0; i < posAttr.count; i++) {
+    tmp.fromBufferAttribute(posAttr, i).normalize();
+    const h = tmp.y * 0.5 + 0.5;
+    const c = bot.clone().lerp(top, Math.pow(h, 0.7));
+    colors[i*3] = c.r; colors[i*3+1] = c.g; colors[i*3+2] = c.b;
+  }
+  geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+  envScene.add(new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ side: THREE.BackSide, vertexColors: true })));
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  const rt = pmrem.fromScene(envScene, 0.04);
+  pmrem.dispose();
+  return rt.texture;
+}
+scene.environment = buildEnvMap();
+
+// ---- Camera (isometric, locked angle; top-down while editing a piece) ----
+const viewSize = 5.5;
+let camZoom = 1.1;
+const camTarget = new THREE.Vector3(4, -1.2, 3);
+const camera = new THREE.OrthographicCamera(-viewSize, viewSize, viewSize, -viewSize, 0.01, 200);
+
+let ISO_ANGLE = Math.PI / 4;
+const ISO_ELEV = Math.atan(1 / Math.sqrt(2));
+const EDIT_ELEV = Math.PI / 2 - 0.15; // near-vertical, not exact (avoids lookAt degenerating)
+let editCamActive = false;
+
+function updateCamera() {
+  const dist = 50;
+  const elev = editCamActive ? EDIT_ELEV : ISO_ELEV;
+  const ce = Math.cos(elev);
+  camera.position.set(
+    camTarget.x + dist * ce * Math.sin(ISO_ANGLE),
+    camTarget.y + dist * Math.sin(elev),
+    camTarget.z + dist * ce * Math.cos(ISO_ANGLE)
+  );
+  camera.lookAt(camTarget);
+  camera.zoom = camZoom;
+  camera.updateProjectionMatrix();
+}
+
+function resize() {
+  const w = window.innerWidth, h = window.innerHeight;
+  const aspect = w / h;
+  camera.left = -viewSize * aspect;
+  camera.right = viewSize * aspect;
+  camera.top = viewSize;
+  camera.bottom = -viewSize;
+  camera.updateProjectionMatrix();
+  renderer.setSize(w, h);
+}
+window.addEventListener("resize", resize);
+resize();
+updateCamera();
+
+window.addEventListener("keydown", (e) => {
+  if (mode !== "view") return;
+  if (e.key === "ArrowLeft") { ISO_ANGLE -= Math.PI / 2; updateCamera(); }
+  else if (e.key === "ArrowRight") { ISO_ANGLE += Math.PI / 2; updateCamera(); }
+});
+
+// ---- Materials ----
+const railMat = new THREE.MeshStandardMaterial({ color: 0xb9bec7, metalness: 1.0, roughness: 0.14, side: THREE.DoubleSide });
+const railMatValid = new THREE.MeshStandardMaterial({ color: 0x8fe0a8, metalness: 0.6, roughness: 0.3, transparent: true, opacity: 0.75, side: THREE.DoubleSide });
+const railMatInvalid = new THREE.MeshStandardMaterial({ color: 0xff8f8f, metalness: 0.6, roughness: 0.3, transparent: true, opacity: 0.75, side: THREE.DoubleSide });
+const poleMat = new THREE.MeshStandardMaterial({ color: 0x8a8f98, metalness: 0.9, roughness: 0.35 });
+const marbleMat = new THREE.MeshStandardMaterial({ color: 0xf0e6d3, metalness: 0.6, roughness: 0.25 });
+const marbleGeo = new THREE.SphereGeometry(MARBLE_R, 24, 16);
+const groundMat = new THREE.MeshStandardMaterial({ color: 0xcec5b4, roughness: 0.9, metalness: 0.0 });
+const sourceMat = new THREE.MeshStandardMaterial({ color: 0x4a9eff, metalness: 0.4, roughness: 0.4, emissive: 0x1a4a80, emissiveIntensity: 0.3 });
+const sinkMat = new THREE.MeshStandardMaterial({ color: 0x2b2b35, metalness: 0.3, roughness: 0.6 });
+const sinkRimMat = new THREE.MeshStandardMaterial({ color: 0x3ecf6b, metalness: 0.4, roughness: 0.3, emissive: 0x1a7a3f, emissiveIntensity: 0.5 });
+const shelfPedestalMat = new THREE.MeshStandardMaterial({ color: 0xd9d2c2, roughness: 0.8 });
+
+// ---- Groups ----
+const marbleGroup = new THREE.Group();
+scene.add(marbleGroup);
+const pieceRootGroup = new THREE.Group();
+scene.add(pieceRootGroup);
+const shelfPedestalGroup = new THREE.Group();
+scene.add(shelfPedestalGroup);
+let gridHelper = null;
+
+const groundGeo = new THREE.PlaneGeometry(60, 60);
+groundGeo.rotateX(-Math.PI / 2);
+const groundMesh = new THREE.Mesh(groundGeo, groundMat);
+groundMesh.position.y = FLOOR_Y;
+scene.add(groundMesh);
+
+// ---- Source / sink visuals (fixed, not draggable) ----
+const sourceMesh = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.4, 16), sourceMat);
+sourceMesh.position.copy(SOURCE_POS).add(new THREE.Vector3(0, 0.25, 0));
+sourceMesh.rotation.x = Math.PI; // apex down
+scene.add(sourceMesh);
+const sourceRing = new THREE.Mesh(new THREE.TorusGeometry(0.3, 0.03, 8, 24), sourceMat);
+sourceRing.rotation.x = Math.PI / 2;
+sourceRing.position.copy(SOURCE_POS).add(new THREE.Vector3(0, 0.02, 0));
+scene.add(sourceRing);
+
+const sinkMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.24, 0.3, 20), sinkMat);
+sinkMesh.position.copy(SINK_POS).add(new THREE.Vector3(0, -0.1, 0));
+scene.add(sinkMesh);
+const sinkRing = new THREE.Mesh(new THREE.TorusGeometry(0.34, 0.035, 8, 24), sinkRimMat);
+sinkRing.rotation.x = Math.PI / 2;
+sinkRing.position.copy(SINK_POS).add(new THREE.Vector3(0, 0.02, 0));
+scene.add(sinkRing);
+
+// ---- Piece geometry: local path points + footprint, per type ----
+const PIECE_DEFS = {
+  straight: {
+    label: "Straight",
+    footprint: [[0,0],[0,1],[0,2],[0,3]],
+    buildLocalPoints: () => [
+      new THREE.Vector3(0, 0, 0),
+      new THREE.Vector3(0, 0, 4 * GRID),
+    ],
+  },
+  slope: {
+    label: "Slope",
+    footprint: [[0,0],[0,1],[0,2],[0,3]],
+    buildLocalPoints: () => [
+      new THREE.Vector3(0, 0, 0),
+      new THREE.Vector3(0, -SLOPE_DROP, 4 * GRID),
+    ],
+  },
+  elbow: {
+    label: "Elbow",
+    footprint: [[0,0],[0,1],[1,0],[1,1]],
+    buildLocalPoints: () => {
+      const pts = [];
+      const cx = ELBOW_R, cz = 0;
+      const N = 16;
+      for (let i = 0; i <= N; i++) {
+        const t = i / N;
+        const theta = Math.PI - t * (Math.PI / 2);
+        pts.push(new THREE.Vector3(cx + ELBOW_R * Math.cos(theta), 0, cz + ELBOW_R * Math.sin(theta)));
+      }
+      return pts;
+    },
+  },
+};
+
+// ---- Rotation / placement transforms ----
+// Matches THREE's Y-axis rotation convention (rotating +Z by +90 deg gives +X).
+function rotateXZ(x, z, steps) {
+  const theta = steps * Math.PI / 2;
+  const c = Math.cos(theta), s = Math.sin(theta);
+  return { x: x * c + z * s, z: -x * s + z * c };
+}
+
+function transformLocalPoint(local, piece) {
+  const r = rotateXZ(local.x, local.z, piece.rot);
+  return new THREE.Vector3(piece.ax + r.x, piece.ay + local.y, piece.az + r.z);
+}
+
+function footprintWorldCells(piece) {
+  return PIECE_DEFS[piece.type].footprint.map(([cx, cz]) => {
+    const lx = (cx + 0.5) * GRID, lz = (cz + 0.5) * GRID;
+    const r = rotateXZ(lx, lz, piece.rot);
+    const wx = piece.ax + r.x, wz = piece.az + r.z;
+    return `${Math.round(wx / GRID - 0.5)},${Math.round(wz / GRID - 0.5)}`;
+  });
+}
+
+function computeOccupancy(excludeId) {
+  const occ = new Set();
+  for (const p of allPieces) {
+    if (!p.placed || p.id === excludeId) continue;
+    for (const cell of footprintWorldCells(p)) occ.add(cell);
+  }
+  return occ;
+}
+
+// ---- Frame / rail-tube builders (same approach as the free-form sandbox) ----
+const WORLD_UP = new THREE.Vector3(0, 1, 0);
+
+function computeFrames(points) {
+  const len = points.length;
+  const tangents = [], normals = [], binormals = [];
+  for (let i = 0; i < len; i++) {
+    let t;
+    if (len === 1) t = new THREE.Vector3(1, 0, 0);
+    else if (i === 0) t = points[1].clone().sub(points[0]).normalize();
+    else if (i === len - 1) t = points[len-1].clone().sub(points[len-2]).normalize();
+    else t = points[i+1].clone().sub(points[i-1]).normalize();
+    tangents.push(t);
+  }
+  let prevB = new THREE.Vector3(1, 0, 0);
+  for (let i = 0; i < len; i++) {
+    let b = new THREE.Vector3().crossVectors(WORLD_UP, tangents[i]);
+    if (b.lengthSq() < 1e-8) b = prevB.clone();
+    else b.normalize();
+    prevB = b;
+    binormals.push(b);
+    normals.push(new THREE.Vector3().crossVectors(tangents[i], b).normalize());
+  }
+  return { tangents, normals, binormals };
+}
+
+function buildRailTube(points, frames, side) {
+  const n = points.length;
+  const positions = [];
+  for (let i = 0; i < n; i++) {
+    const center = points[i].clone().addScaledVector(frames.binormals[i], side * RAIL_GAUGE / 2);
+    for (let k = 0; k < RAIL_RADIAL_SEGS; k++) {
+      const theta = (k / RAIL_RADIAL_SEGS) * Math.PI * 2;
+      const p = center.clone()
+        .addScaledVector(frames.normals[i], Math.cos(theta) * RAIL_RADIUS)
+        .addScaledVector(frames.binormals[i], Math.sin(theta) * RAIL_RADIUS);
+      positions.push(p.x, p.y, p.z);
+    }
+  }
+  const indices = [];
+  for (let i = 0; i < n - 1; i++) {
+    for (let k = 0; k < RAIL_RADIAL_SEGS; k++) {
+      const k2 = (k + 1) % RAIL_RADIAL_SEGS;
+      const a = i * RAIL_RADIAL_SEGS + k, b = i * RAIL_RADIAL_SEGS + k2;
+      const c = (i + 1) * RAIL_RADIAL_SEGS + k, d = (i + 1) * RAIL_RADIAL_SEGS + k2;
+      indices.push(a, c, b, b, c, d);
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  return { geo, positions, indices };
+}
+
+// ---- Physics ----
+let physicsWorld = new b3.World({
+  gravity: { x: 0, y: -9.8, z: 0 },
+  enableSleep: false,
+  enableContinuous: true,
+  contactHertz: 30,
+  contactDampingRatio: 1,
+});
+
+const floorBody = physicsWorld.createBody({ type: "static", position: { x: 0, y: FLOOR_Y, z: 0 } });
+floorBody.createBox({ halfExtents: { x: 30, y: 0.5, z: 30 }, friction: 0.8, restitution: 0.1 });
+
+// ---- Piece instances ----
+let allPieces = [];
+let nextPieceId = 1;
+
+function makePiece(type, shelfX, shelfZ) {
+  const piece = {
+    id: nextPieceId++,
+    type,
+    rot: 0,
+    ax: shelfX, ay: 0, az: shelfZ,
+    shelfPos: { x: shelfX, z: shelfZ },
+    placed: false,
+    group: new THREE.Group(),
+    colliderBodies: [],
+    entryWorld: null,
+    exitWorld: null,
+  };
+  pieceRootGroup.add(piece.group);
+  allPieces.push(piece);
+  return piece;
+}
+
+function clearPieceGroup(piece) {
+  while (piece.group.children.length) {
+    const c = piece.group.children.pop();
+    if (c.geometry) c.geometry.dispose();
+  }
+  for (const body of piece.colliderBodies) body.destroy();
+  piece.colliderBodies = [];
+}
+
+// ghostState: null (normal) | "valid" | "invalid" -- tints the rail while being dragged
+function rebuildPieceMesh(piece, ghostState = null) {
+  clearPieceGroup(piece);
+  const def = PIECE_DEFS[piece.type];
+  const localPts = def.buildLocalPoints();
+  const worldPts = localPts.map(p => transformLocalPoint(p, piece));
+  piece.entryWorld = worldPts[0].clone();
+  piece.exitWorld = worldPts[worldPts.length - 1].clone();
+
+  const frames = computeFrames(worldPts);
+  const mat = ghostState === "valid" ? railMatValid : ghostState === "invalid" ? railMatInvalid : railMat;
+  const railData = [];
+  for (const side of [-1, 1]) {
+    const { geo, positions, indices } = buildRailTube(worldPts, frames, side);
+    piece.group.add(new THREE.Mesh(geo, mat));
+    railData.push({ positions, indices });
+  }
+
+  // Real colliders + support poles only once actually committed to the board.
+  if (piece.placed && !ghostState) {
+    for (const { positions, indices } of railData) {
+      const vertices = new Array(positions.length / 3);
+      for (let i = 0; i < vertices.length; i++) {
+        vertices[i] = { x: positions[i*3], y: positions[i*3+1], z: positions[i*3+2] };
+      }
+      const body = physicsWorld.createBody({ type: "static" });
+      body.createMesh({ vertices, indices, friction: 0.10, restitution: 0.05 });
+      piece.colliderBodies.push(body);
+    }
+    for (const end of [piece.entryWorld, piece.exitWorld]) {
+      const height = end.y - FLOOR_Y;
+      if (height > 0.01) {
+        const poleGeo = new THREE.CylinderGeometry(POLE_RADIUS, POLE_RADIUS, height, 8);
+        const pole = new THREE.Mesh(poleGeo, poleMat);
+        pole.position.set(end.x, FLOOR_Y + height / 2, end.z);
+        pole.userData.pieceId = piece.id;
+        piece.group.add(pole);
+      }
+    }
+  }
+}
+
+// ---- Level piece pool (hand-authored proof-of-concept layout) ----
+// Solution: straight (rot 0) at (1,0) -> elbow (rot 0) at (1,4) -> slope (rot 1) at (3,6) -> sink.
+// A spare straight is included as a decoy/distractor.
+const shelfSlots = [{x: -1, z: -2.5}, {x: 1, z: -2.5}, {x: 3, z: -2.5}, {x: 5, z: -2.5}];
+const levelPieceTypes = ["straight", "elbow", "slope", "straight"];
+for (let i = 0; i < levelPieceTypes.length; i++) {
+  const piece = makePiece(levelPieceTypes[i], shelfSlots[i].x, shelfSlots[i].z);
+  rebuildPieceMesh(piece);
+}
+
+// Small pedestals under the shelf pieces, purely cosmetic.
+for (const slot of shelfSlots) {
+  const ped = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.55, 0.12, 20), shelfPedestalMat);
+  ped.position.set(slot.x, -0.06, slot.z);
+  shelfPedestalGroup.add(ped);
+}
+
+// ---- Shelf labels (DOM, only for unplaced pieces) ----
+const overlay = document.getElementById("ui-overlay");
+const shelfLabelEls = new Map();
+function updateShelfLabels() {
+  for (const [id, el] of shelfLabelEls) {
+    const piece = allPieces.find(p => p.id === id);
+    if (!piece || piece.placed || piece.id === editingPiece?.id) { el.remove(); shelfLabelEls.delete(id); }
+  }
+  for (const piece of allPieces) {
+    if (piece.placed || piece.id === editingPiece?.id) continue;
+    let el = shelfLabelEls.get(piece.id);
+    if (!el) {
+      el = document.createElement("div");
+      el.className = "shelf-label";
+      el.textContent = PIECE_DEFS[piece.type].label;
+      overlay.appendChild(el);
+      shelfLabelEls.set(piece.id, el);
+    }
+    const pos3d = new THREE.Vector3(piece.shelfPos.x, 0.6, piece.shelfPos.z);
+    const projected = pos3d.project(camera);
+    const rect = canvas.getBoundingClientRect();
+    el.style.left = ((projected.x * 0.5 + 0.5) * rect.width) + "px";
+    el.style.top = ((-projected.y * 0.5 + 0.5) * rect.height) + "px";
+  }
+}
+
+// ---- Interaction state machine ----
+// mode: "view" (pan/zoom/select) | "editPiece" (top-down drag/rotate/confirm)
+let mode = "view";
+let editingPiece = null;
+let editValid = false;
+let savedCam = null;
+
+const editToolbar = document.getElementById("edit-toolbar");
+
+function enterEdit(piece) {
+  mode = "editPiece";
+  editingPiece = piece;
+  piece._savedTransform = { ax: piece.ax, az: piece.az, ay: piece.ay, rot: piece.rot, placed: piece.placed };
+  savedCam = { target: camTarget.clone(), zoom: camZoom };
+  camTarget.set(piece.ax, 0, piece.az);
+  camZoom = 2.4;
+  editCamActive = true;
+  updateCamera();
+  closeHeightCard();
+
+  gridHelper = new THREE.GridHelper(30, 30, 0x999999, 0xcccccc);
+  gridHelper.position.set(0, piece.ay + 0.005, 0);
+  scene.add(gridHelper);
+
+  editToolbar.classList.add("visible");
+  refreshGhost();
+}
+
+function refreshGhost() {
+  const occ = computeOccupancy(editingPiece.id);
+  const cells = footprintWorldCells(editingPiece);
+  editValid = cells.every(c => !occ.has(c));
+  rebuildPieceMesh(editingPiece, editValid ? "valid" : "invalid");
+}
+
+function exitEdit(commit) {
+  const piece = editingPiece;
+  if (commit) {
+    if (!editValid) return; // stay in edit mode until the spot is valid
+    piece.placed = true;
+  } else {
+    // Cancel: revert to whatever this piece was before this edit session
+    // (its shelf slot if it had never been placed).
+    const saved = piece._savedTransform;
+    piece.ax = saved.ax; piece.az = saved.az; piece.ay = saved.ay;
+    piece.rot = saved.rot; piece.placed = saved.placed;
+  }
+  rebuildPieceMesh(piece);
+
+  mode = "view";
+  editingPiece = null;
+  editCamActive = false;
+  if (gridHelper) { scene.remove(gridHelper); gridHelper = null; }
+  editToolbar.classList.remove("visible");
+  if (savedCam) { camTarget.copy(savedCam.target); camZoom = savedCam.zoom; savedCam = null; }
+  updateCamera();
+}
+
+document.getElementById("edit-rot-ccw").addEventListener("pointerdown", (e) => {
+  e.stopPropagation();
+  editingPiece.rot = (editingPiece.rot + 3) % 4;
+  refreshGhost();
+});
+document.getElementById("edit-rot-cw").addEventListener("pointerdown", (e) => {
+  e.stopPropagation();
+  editingPiece.rot = (editingPiece.rot + 1) % 4;
+  refreshGhost();
+});
+document.getElementById("edit-confirm").addEventListener("pointerdown", (e) => {
+  e.stopPropagation();
+  exitEdit(true);
+});
+document.getElementById("edit-cancel").addEventListener("pointerdown", (e) => {
+  e.stopPropagation();
+  exitEdit(false);
+});
+
+// ---- Height ("up/down") card for placed pieces' poles ----
+let heightCardEl = null;
+let heightCardPieceId = null;
+
+function openHeightCard(piece) {
+  closeHeightCard();
+  heightCardPieceId = piece.id;
+  heightCardEl = document.createElement("div");
+  heightCardEl.className = "float-card height-card";
+  heightCardEl.innerHTML = `
+    <button class="h-down">&#9660;</button>
+    <span class="h-value">${piece.ay.toFixed(2)}</span>
+    <button class="h-up">&#9650;</button>
+  `;
+  overlay.appendChild(heightCardEl);
+  const valEl = heightCardEl.querySelector(".h-value");
+
+  function adjust(delta) {
+    piece.ay = Math.max(-6, Math.min(2, piece.ay + delta));
+    valEl.textContent = piece.ay.toFixed(2);
+    rebuildPieceMesh(piece);
+    positionHeightCard(piece);
+  }
+  heightCardEl.querySelector(".h-up").addEventListener("pointerdown", (e) => { e.stopPropagation(); adjust(0.15); });
+  heightCardEl.querySelector(".h-down").addEventListener("pointerdown", (e) => { e.stopPropagation(); adjust(-0.15); });
+  heightCardEl.addEventListener("pointerdown", (e) => e.stopPropagation());
+
+  positionHeightCard(piece);
+}
+
+function positionHeightCard(piece) {
+  if (!heightCardEl) return;
+  const pos3d = piece.entryWorld.clone();
+  pos3d.y += 0.35;
+  const projected = pos3d.project(camera);
+  const rect = canvas.getBoundingClientRect();
+  heightCardEl.style.left = ((projected.x * 0.5 + 0.5) * rect.width) + "px";
+  heightCardEl.style.top = ((-projected.y * 0.5 + 0.5) * rect.height) + "px";
+}
+
+function closeHeightCard() {
+  if (heightCardEl) { heightCardEl.remove(); heightCardEl = null; }
+  heightCardPieceId = null;
+}
+
+// ---- Pointer interaction ----
+const raycaster = new THREE.Raycaster();
+const dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+let panning = false;
+let panStartX = 0, panStartY = 0;
+let pointerDownTime = 0;
+let pointerMoved = false;
+const activePointers = new Map();
+let twoFingerLastDist = null;
+
+function ndcFromEvent(e) {
+  const rect = canvas.getBoundingClientRect();
+  return new THREE.Vector2(
+    ((e.clientX - rect.left) / rect.width) * 2 - 1,
+    -((e.clientY - rect.top) / rect.height) * 2 + 1
+  );
+}
+
+canvas.addEventListener("pointerdown", (e) => {
+  canvas.setPointerCapture(e.pointerId);
+  activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  pointerDownTime = performance.now();
+  pointerMoved = false;
+
+  if (mode === "editPiece") return; // drag handled in pointermove
+
+  if (activePointers.size === 1) {
+    panning = true;
+    panStartX = e.clientX;
+    panStartY = e.clientY;
+  }
+  if (activePointers.size >= 2) {
+    panning = false;
+    const pts = [...activePointers.values()];
+    twoFingerLastDist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+  }
+});
+
+canvas.addEventListener("pointermove", (e) => {
+  if (!activePointers.has(e.pointerId)) return;
+  const prev = activePointers.get(e.pointerId);
+  activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+  if (mode === "editPiece") {
+    raycaster.setFromCamera(ndcFromEvent(e), camera);
+    const hit = new THREE.Vector3();
+    if (raycaster.ray.intersectPlane(dragPlane, hit)) {
+      editingPiece.ax = Math.round(hit.x / GRID) * GRID;
+      editingPiece.az = Math.round(hit.z / GRID) * GRID;
+      refreshGhost();
+    }
+    pointerMoved = true;
+    return;
+  }
+
+  if (activePointers.size >= 2) {
+    const pts = [...activePointers.values()];
+    const d = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+    if (twoFingerLastDist > 1) {
+      camZoom = THREE.MathUtils.clamp(camZoom * (d / twoFingerLastDist), 0.3, 8);
+      updateCamera();
+    }
+    twoFingerLastDist = d;
+    pointerMoved = true;
+    return;
+  }
+
+  if (panning) {
+    const dx = e.clientX - prev.x;
+    const dy = e.clientY - prev.y;
+    if (Math.abs(e.clientX - panStartX) + Math.abs(e.clientY - panStartY) > 5) pointerMoved = true;
+    const panScale = (viewSize / camZoom) * 0.003;
+    const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0);
+    const up = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1);
+    camTarget.addScaledVector(right, -dx * panScale);
+    camTarget.addScaledVector(up, dy * panScale);
+    updateCamera();
+  }
+});
+
+function endPointer(e) {
+  activePointers.delete(e.pointerId);
+  try { canvas.releasePointerCapture(e.pointerId); } catch (_) {}
+
+  if (mode === "editPiece") return;
+
+  if (activePointers.size === 0) {
+    const elapsed = performance.now() - pointerDownTime;
+    if (!pointerMoved && elapsed < 300) handleTap(e);
+    panning = false;
+    twoFingerLastDist = null;
+  }
+}
+canvas.addEventListener("pointerup", endPointer);
+canvas.addEventListener("pointercancel", endPointer);
+
+canvas.addEventListener("wheel", (e) => {
+  e.preventDefault();
+  camZoom = THREE.MathUtils.clamp(camZoom * (e.deltaY > 0 ? 1 / 1.1 : 1.1), 0.3, 8);
+  updateCamera();
+}, { passive: false });
+
+const NODE_HIT_RADIUS_SCREEN = 26;
+
+function handleTap(e) {
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+
+  // Poles (small, point-like) get screen-space nearest-point picking, same trick
+  // the free-form sandbox uses for its node markers.
+  let bestPiece = null, bestDist = NODE_HIT_RADIUS_SCREEN;
+  for (const piece of allPieces) {
+    if (!piece.placed) continue;
+    for (const end of [piece.entryWorld, piece.exitWorld]) {
+      const pos = end.clone().project(camera);
+      const sx = (pos.x * 0.5 + 0.5) * rect.width;
+      const sy = (-pos.y * 0.5 + 0.5) * rect.height;
+      const d = Math.hypot(mx - sx, my - sy);
+      if (d < bestDist) { bestDist = d; bestPiece = piece; }
+    }
+  }
+  if (bestPiece) {
+    if (heightCardPieceId === bestPiece.id) closeHeightCard();
+    else openHeightCard(bestPiece);
+    return;
+  }
+  closeHeightCard();
+
+  // Piece bodies are real 3D shapes -- raycast against their meshes.
+  raycaster.setFromCamera(ndcFromEvent(e), camera);
+  const meshes = [];
+  for (const piece of allPieces) meshes.push(...piece.group.children);
+  const hits = raycaster.intersectObjects(meshes, false);
+  if (hits.length) {
+    const piece = allPieces.find(p => p.group.children.includes(hits[0].object));
+    if (piece) enterEdit(piece);
+  }
+}
+
+document.addEventListener("pointerdown", (e) => {
+  if (heightCardEl && !heightCardEl.contains(e.target) && e.target !== canvas) closeHeightCard();
+});
+
+// ---- Marbles ----
+let liveMarbles = [];
+let pendingSpawns = 0;
+let spawnCooldown = 0;
+let runActive = false;
+let deliveredCount = 0;
+let resolvedCount = 0;
+
+function spawnMarble() {
+  const sp = SOURCE_POS.clone();
+  sp.y += MARBLE_R * 1.5;
+  const kick = { x: SOURCE_HEADING.x * SPAWN_KICK, y: 0, z: SOURCE_HEADING.z * SPAWN_KICK };
+  const body = physicsWorld.createBody({ type: "dynamic", position: { x: sp.x, y: sp.y, z: sp.z }, linearVelocity: kick });
+  body.createSphere({ radius: MARBLE_R, density: 1, friction: 0.2, restitution: 0.05 });
+  const mat = marbleMat.clone();
+  mat.color.setHSL(Math.random(), 0.15, 0.85);
+  const mesh = new THREE.Mesh(marbleGeo, mat);
+  marbleGroup.add(mesh);
+  liveMarbles.push({ body, mesh, delivered: false, lost: false, resolved: false, expireTimer: 0 });
+}
+
+// ---- Audio ----
+let audioCtx = null;
+function ensureAudio() {
+  if (audioCtx) return audioCtx;
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return audioCtx;
+}
+
+function playFinale() {
+  const ctx = ensureAudio();
+  if (ctx.state === "suspended") ctx.resume();
+  const t = ctx.currentTime;
+  const freqs = [440, 880, 1320, 1760];
+  const gains = [0.2, 0.12, 0.06, 0.03];
+  for (let i = 0; i < freqs.length; i++) {
+    const osc = ctx.createOscillator();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(freqs[i], t);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(gains[i], t + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 2.0);
+    osc.connect(g).connect(ctx.destination);
+    osc.start(t);
+    osc.stop(t + 2.1);
+  }
+}
+
+function playCrunch() {
+  const ctx = ensureAudio();
+  if (ctx.state === "suspended") ctx.resume();
+  const t = ctx.currentTime;
+  const bufferSize = ctx.sampleRate * 0.15;
+  const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < bufferSize; i++) data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.3));
+  const noise = ctx.createBufferSource();
+  noise.buffer = buffer;
+  const filter = ctx.createBiquadFilter();
+  filter.type = "lowpass";
+  filter.frequency.setValueAtTime(800, t);
+  filter.frequency.exponentialRampToValueAtTime(200, t + 0.15);
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.3, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
+  noise.connect(filter).connect(g).connect(ctx.destination);
+  noise.start(t);
+  noise.stop(t + 0.25);
+}
+
+// ---- Play / HUD / win-loss ----
+const hud = document.getElementById("hud");
+const playBtn = document.getElementById("play-btn");
+const toastEl = document.getElementById("toast");
+const successModal = document.getElementById("success-modal");
+
+function updateHud() { hud.textContent = `Delivered: ${deliveredCount} / ${TOTAL_MARBLES}`; }
+
+function showToast(msg) {
+  toastEl.textContent = msg;
+  toastEl.classList.add("visible");
+  setTimeout(() => toastEl.classList.remove("visible"), 2600);
+}
+
+playBtn.addEventListener("pointerdown", () => {
+  if (runActive) return;
+  ensureAudio();
+  if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+  for (const m of liveMarbles) { m.body.destroy(); marbleGroup.remove(m.mesh); m.mesh.material.dispose(); }
+  liveMarbles = [];
+  deliveredCount = 0;
+  resolvedCount = 0;
+  updateHud();
+  runActive = true;
+  playBtn.disabled = true;
+  pendingSpawns = TOTAL_MARBLES;
+  spawnCooldown = 0;
+});
+
+function finishRun() {
+  runActive = false;
+  playBtn.disabled = false;
+  if (deliveredCount === TOTAL_MARBLES) {
+    successModal.classList.add("visible");
+    burstConfetti();
+  } else {
+    showToast(`${deliveredCount}/${TOTAL_MARBLES} reached the sink -- place some track and try again.`);
+  }
+}
+
+function burstConfetti() {
+  const colors = ["#4a9eff", "#3ecf6b", "#ffcf4a", "#ff6b4a", "#c94aff"];
+  for (let i = 0; i < 70; i++) {
+    const el = document.createElement("div");
+    el.className = "confetti-piece";
+    const size = 6 + Math.random() * 6;
+    el.style.width = size + "px";
+    el.style.height = (size * 1.6) + "px";
+    el.style.left = (Math.random() * 100) + "vw";
+    el.style.background = colors[i % colors.length];
+    el.style.animationDuration = (1.8 + Math.random() * 1.4) + "s";
+    el.style.animationDelay = (Math.random() * 0.4) + "s";
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 4000);
+  }
+}
+
+document.getElementById("new-puzzle-btn").addEventListener("pointerdown", () => {
+  successModal.classList.remove("visible");
+  for (const piece of allPieces) {
+    piece.placed = false;
+    piece.rot = 0;
+    piece.ax = piece.shelfPos.x;
+    piece.ay = 0;
+    piece.az = piece.shelfPos.z;
+    rebuildPieceMesh(piece);
+  }
+  deliveredCount = 0;
+  resolvedCount = 0;
+  updateHud();
+});
+
+// ---- Animation loop ----
+let physicsAccumulator = 0;
+let lastTime = performance.now() / 1000;
+
+function animate() {
+  requestAnimationFrame(animate);
+  const now = performance.now() / 1000;
+  const dt = Math.min(now - lastTime, 0.25);
+  lastTime = now;
+
+  if (pendingSpawns > 0) {
+    spawnCooldown -= dt;
+    if (spawnCooldown <= 0) { spawnMarble(); pendingSpawns--; spawnCooldown = SPAWN_STAGGER; }
+  }
+
+  physicsAccumulator += dt;
+  while (physicsAccumulator >= PHYSICS_DT) {
+    physicsWorld.step(PHYSICS_DT, 8);
+    physicsAccumulator -= PHYSICS_DT;
+  }
+
+  const toRemove = [];
+  for (let mi = 0; mi < liveMarbles.length; mi++) {
+    const m = liveMarbles[mi];
+    const p = m.body.getPosition(), r = m.body.getRotation();
+    m.mesh.position.set(p.x, p.y, p.z);
+    m.mesh.quaternion.set(r.x, r.y, r.z, r.w);
+
+    if (!m.resolved) {
+      const distToSink = Math.hypot(p.x - SINK_POS.x, p.y - SINK_POS.y, p.z - SINK_POS.z);
+      const hitFloor = p.y <= FLOOR_Y + MARBLE_R + 0.15;
+      const wayOut = Math.abs(p.x - SOURCE_POS.x) > 30 || Math.abs(p.z - SOURCE_POS.z) > 30;
+      if (distToSink < DELIVER_RADIUS) {
+        m.resolved = true; m.delivered = true; m.expireTimer = 0;
+        deliveredCount++; resolvedCount++; updateHud();
+        playFinale();
+      } else if (hitFloor || wayOut) {
+        m.resolved = true; m.lost = true; m.expireTimer = 0;
+        resolvedCount++; updateHud();
+        playCrunch();
+      }
+    }
+
+    if (m.resolved) {
+      m.expireTimer += dt;
+      const fade = 1 - Math.min(m.expireTimer / MARBLE_EXPIRE_TIME, 1);
+      m.mesh.material.opacity = fade;
+      m.mesh.material.transparent = true;
+      if (m.expireTimer >= MARBLE_EXPIRE_TIME) toRemove.push(mi);
+    }
+  }
+  for (let i = toRemove.length - 1; i >= 0; i--) {
+    const mi = toRemove[i];
+    const m = liveMarbles[mi];
+    m.body.destroy();
+    marbleGroup.remove(m.mesh);
+    m.mesh.material.dispose();
+    liveMarbles.splice(mi, 1);
+  }
+
+  if (runActive && pendingSpawns === 0 && resolvedCount === TOTAL_MARBLES && liveMarbles.length === 0) {
+    finishRun();
+  }
+
+  if (heightCardPieceId !== null) {
+    const piece = allPieces.find(p => p.id === heightCardPieceId);
+    if (piece) positionHeightCard(piece);
+  }
+  updateShelfLabels();
+
+  renderer.render(scene, camera);
+}
+
+updateHud();
+animate();
+
+</script>
+</body>
+</html>
