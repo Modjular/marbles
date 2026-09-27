@@ -1,0 +1,836 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<title>the spire</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #02020a; font-family: system-ui, -apple-system, sans-serif; }
+canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+
+#hint {
+  position: absolute;
+  bottom: 110px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: rgba(255,255,255,0.55);
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  pointer-events: none;
+  transition: opacity 0.8s;
+  text-align: center;
+  text-shadow: 0 1px 6px rgba(0,0,0,0.6);
+}
+
+#hud {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  z-index: 20;
+  color: rgba(255,255,255,0.75);
+  font-size: 12px;
+  letter-spacing: 0.03em;
+  text-shadow: 0 1px 6px rgba(0,0,0,0.6);
+  pointer-events: none;
+  line-height: 1.7;
+}
+#hud b { color: #fff; font-variant-numeric: tabular-nums; }
+
+#launch-btn {
+  position: absolute;
+  bottom: 30px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  border: none;
+  border-radius: 999px;
+  padding: 15px 34px;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #04060f;
+  background: linear-gradient(135deg, #7fe8ff, #b98bff);
+  box-shadow: 0 4px 24px rgba(130, 160, 255, 0.45);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 0.1s;
+}
+#launch-btn:active { transform: translateX(-50%) scale(0.95); }
+
+#pulse-btn {
+  position: absolute;
+  bottom: 30px;
+  right: 24px;
+  z-index: 20;
+  width: 60px; height: 60px;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,0.25);
+  background: rgba(255,255,255,0.08);
+  backdrop-filter: blur(6px);
+  color: #fff;
+  font-size: 22px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 0.1s;
+}
+#pulse-btn:active { transform: scale(0.9); }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud">MARBLES ALOFT <b id="hud-live">0</b><br>LOOPS COMPLETED <b id="hud-loops">0</b></div>
+<div id="hint">drag to orbit &middot; scroll to zoom &middot; tap the spire</div>
+<button id="pulse-btn" title="Pulse the spire">&#10022;</button>
+<button id="launch-btn">&#10024; LAUNCH CASCADE</button>
+
+<script type="importmap">
+  { "imports": {
+    "three": "https://unpkg.com/three@0.169.0/build/three.module.js",
+    "box3d-wasm": "./wasm/entry.mjs"
+  } }
+</script>
+<script type="module">
+import * as THREE from "three";
+import Box3D from "box3d-wasm";
+
+const b3 = await Box3D();
+
+// ==================================================================
+// A colossal descending 3-strand helix wrapped around a glowing spire,
+// impossible at desk scale on purpose. Marbles never stop: reaching the
+// bottom teleports them back to the top through a portal, forever.
+// ==================================================================
+
+// ---- Scale ----
+const MARBLE_R = 0.22;
+const RAIL_RADIUS = 0.06;
+const RAIL_GAUGE = 0.36;
+const RAIL_RADIAL_SEGS = 10;
+const HELIX_RADIUS = 4.0;
+const HELIX_HEIGHT = 52;
+const HELIX_TURNS = 8;
+const SAMPLES_PER_TURN = 32;
+const HELIX_BANK = 0.35;
+const TOP_Y = 2;
+const PORTAL_Y = TOP_Y - HELIX_HEIGHT;
+const STRAND_OFFSETS = [0, (2*Math.PI)/3, (4*Math.PI)/3];
+const STRAND_COLORS = [0x33ccff, 0xff44cc, 0xffcc33];
+const STRAND_CHIMES = [
+  [261.6, 293.7, 329.6, 392.0, 440.0, 523.3, 587.3, 659.3],
+  [220.0, 246.9, 277.2, 329.6, 370.0, 440.0, 493.9, 554.4],
+  [196.0, 220.0, 246.9, 293.7, 329.6, 392.0, 440.0, 493.9],
+];
+
+const PHYSICS_DT = 1 / 60;
+const SPAWN_KICK = 1.6;
+const MAX_MARBLES = 36;
+const TRAIL_LEN = 18;
+const TRICKLE_INTERVAL = 2.2;
+
+// ---- Renderer + Scene ----
+const canvas = document.getElementById("c");
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.15;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x02020a);
+scene.fog = new THREE.FogExp2(0x02020a, 0.0075);
+
+scene.add(new THREE.AmbientLight(0x1a1a30, 0.6));
+const topLight = new THREE.PointLight(0x66ccff, 6, 40, 2);
+topLight.position.set(0, TOP_Y + 3, 0);
+scene.add(topLight);
+const bottomLight = new THREE.PointLight(0xaa44ff, 6, 40, 2);
+bottomLight.position.set(0, PORTAL_Y - 2, 0);
+scene.add(bottomLight);
+const rimLight = new THREE.DirectionalLight(0xffffff, 0.25);
+rimLight.position.set(10, 10, 6);
+scene.add(rimLight);
+
+// ---- Starfield ----
+function buildStarfield() {
+  const COUNT = 3000;
+  const positions = new Float32Array(COUNT * 3);
+  for (let i = 0; i < COUNT; i++) {
+    const r = 80 + Math.random() * 160;
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.acos(2 * Math.random() - 1);
+    positions[i*3]   = r * Math.sin(phi) * Math.cos(theta);
+    positions[i*3+1] = r * Math.cos(phi) * 0.6;
+    positions[i*3+2] = r * Math.sin(phi) * Math.sin(theta);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  const mat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.55, sizeAttenuation: true, transparent: true, opacity: 0.85, fog: false });
+  return new THREE.Points(geo, mat);
+}
+scene.add(buildStarfield());
+
+// ---- Camera: free orbit (perspective, not the locked isometric of the other toys) ----
+const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 600);
+const orbitTarget = new THREE.Vector3(0, TOP_Y - HELIX_HEIGHT / 2, 0);
+let orbitAzimuth = Math.PI / 4;
+let orbitPolar = 1.2;
+let orbitDist = 22;
+let autoRotate = true;
+let lastInputTime = 0;
+
+function updateCamera() {
+  const p = Math.max(0.2, Math.min(Math.PI - 0.2, orbitPolar));
+  camera.position.set(
+    orbitTarget.x + orbitDist * Math.sin(p) * Math.sin(orbitAzimuth),
+    orbitTarget.y + orbitDist * Math.cos(p),
+    orbitTarget.z + orbitDist * Math.sin(p) * Math.cos(orbitAzimuth)
+  );
+  camera.lookAt(orbitTarget);
+}
+
+function resize() {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+}
+window.addEventListener("resize", resize);
+resize();
+updateCamera();
+
+// ---- Glow sprite texture (cheap bloom-lite for marbles) ----
+function makeGlowTexture() {
+  const size = 128;
+  const c = document.createElement("canvas");
+  c.width = c.height = size;
+  const ctx = c.getContext("2d");
+  const grad = ctx.createRadialGradient(size/2, size/2, 0, size/2, size/2, size/2);
+  grad.addColorStop(0, "rgba(255,255,255,1)");
+  grad.addColorStop(0.4, "rgba(255,255,255,0.45)");
+  grad.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, size, size);
+  return new THREE.CanvasTexture(c);
+}
+const glowTex = makeGlowTexture();
+
+// ---- Frame / rail-tube builders (same technique as the free-form sandbox) ----
+const WORLD_UP = new THREE.Vector3(0, 1, 0);
+
+function computeFrames(points) {
+  const len = points.length;
+  const tangents = [], normals = [], binormals = [];
+  for (let i = 0; i < len; i++) {
+    let t;
+    if (len === 1) t = new THREE.Vector3(1, 0, 0);
+    else if (i === 0) t = points[1].clone().sub(points[0]).normalize();
+    else if (i === len - 1) t = points[len-1].clone().sub(points[len-2]).normalize();
+    else t = points[i+1].clone().sub(points[i-1]).normalize();
+    tangents.push(t);
+  }
+  let prevB = new THREE.Vector3(1, 0, 0);
+  for (let i = 0; i < len; i++) {
+    let b = new THREE.Vector3().crossVectors(WORLD_UP, tangents[i]);
+    if (b.lengthSq() < 1e-8) b = prevB.clone();
+    else b.normalize();
+    prevB = b;
+    binormals.push(b);
+    normals.push(new THREE.Vector3().crossVectors(tangents[i], b).normalize());
+  }
+  return { tangents, normals, binormals };
+}
+
+function applyBank(frames, angle) {
+  const cos = Math.cos(angle), sin = Math.sin(angle);
+  for (let i = 0; i < frames.normals.length; i++) {
+    const n = frames.normals[i], b = frames.binormals[i];
+    frames.normals[i] = n.clone().multiplyScalar(cos).addScaledVector(b, sin);
+    frames.binormals[i] = b.clone().multiplyScalar(cos).addScaledVector(n, -sin);
+  }
+}
+
+function buildRailTube(points, frames, side) {
+  const n = points.length;
+  const positions = [];
+  for (let i = 0; i < n; i++) {
+    const center = points[i].clone().addScaledVector(frames.binormals[i], side * RAIL_GAUGE / 2);
+    for (let k = 0; k < RAIL_RADIAL_SEGS; k++) {
+      const theta = (k / RAIL_RADIAL_SEGS) * Math.PI * 2;
+      const p = center.clone()
+        .addScaledVector(frames.normals[i], Math.cos(theta) * RAIL_RADIUS)
+        .addScaledVector(frames.binormals[i], Math.sin(theta) * RAIL_RADIUS);
+      positions.push(p.x, p.y, p.z);
+    }
+  }
+  const indices = [];
+  for (let i = 0; i < n - 1; i++) {
+    for (let k = 0; k < RAIL_RADIAL_SEGS; k++) {
+      const k2 = (k + 1) % RAIL_RADIAL_SEGS;
+      const a = i * RAIL_RADIAL_SEGS + k, b = i * RAIL_RADIAL_SEGS + k2;
+      const c = (i + 1) * RAIL_RADIAL_SEGS + k, d = (i + 1) * RAIL_RADIAL_SEGS + k2;
+      indices.push(a, c, b, b, c, d);
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  return { geo, positions, indices };
+}
+
+// ---- Helix parametrization ----
+function helixPointAt(offset, t) {
+  const theta = t * HELIX_TURNS * Math.PI * 2 + offset;
+  const y = TOP_Y - t * HELIX_HEIGHT;
+  const pos = new THREE.Vector3(HELIX_RADIUS * Math.cos(theta), y, HELIX_RADIUS * Math.sin(theta));
+  const dtheta = HELIX_TURNS * Math.PI * 2;
+  const tangent = new THREE.Vector3(
+    -HELIX_RADIUS * Math.sin(theta) * dtheta,
+    -HELIX_HEIGHT,
+    HELIX_RADIUS * Math.cos(theta) * dtheta
+  ).normalize();
+  return { pos, tangent };
+}
+
+function buildHelixPoints(offset) {
+  const N = HELIX_TURNS * SAMPLES_PER_TURN;
+  const pts = [];
+  for (let i = 0; i <= N; i++) pts.push(helixPointAt(offset, i / N).pos);
+  return pts;
+}
+
+// ---- Physics ----
+let physicsWorld = new b3.World({
+  gravity: { x: 0, y: -9.8, z: 0 },
+  enableSleep: false,
+  enableContinuous: true,
+  contactHertz: 30,
+  contactDampingRatio: 1,
+});
+
+// Safety catch far below the portal in case a marble ever slips past the
+// teleport check -- it just gets recycled from here instead of falling forever.
+const floorBody = physicsWorld.createBody({ type: "static", position: { x: 0, y: PORTAL_Y - 12, z: 0 } });
+floorBody.createBox({ halfExtents: { x: 40, y: 0.5, z: 40 }, friction: 0.8, restitution: 0.1 });
+
+// ---- Build the three rail strands ----
+const strandGroup = new THREE.Group();
+scene.add(strandGroup);
+
+for (let s = 0; s < 3; s++) {
+  const pts = buildHelixPoints(STRAND_OFFSETS[s]);
+  const frames = computeFrames(pts);
+  applyBank(frames, HELIX_BANK);
+  const mat = new THREE.MeshStandardMaterial({
+    color: STRAND_COLORS[s], emissive: STRAND_COLORS[s], emissiveIntensity: 0.55,
+    metalness: 0.7, roughness: 0.25, side: THREE.DoubleSide,
+  });
+  for (const side of [-1, 1]) {
+    const { geo, positions, indices } = buildRailTube(pts, frames, side);
+    strandGroup.add(new THREE.Mesh(geo, mat));
+    const vertices = new Array(positions.length / 3);
+    for (let i = 0; i < vertices.length; i++) vertices[i] = { x: positions[i*3], y: positions[i*3+1], z: positions[i*3+2] };
+    const body = physicsWorld.createBody({ type: "static" });
+    body.createMesh({ vertices, indices, friction: 0.10, restitution: 0.05 });
+  }
+}
+
+// ---- Central spire ----
+const spireMat = new THREE.MeshStandardMaterial({ color: 0x6a5acd, emissive: 0x4433aa, emissiveIntensity: 0.5, metalness: 0.6, roughness: 0.3 });
+const spireHeight = HELIX_HEIGHT + 8;
+const spireMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.7, spireHeight, 28), spireMat);
+spireMesh.position.set(0, TOP_Y - HELIX_HEIGHT / 2, 0);
+scene.add(spireMesh);
+
+// Checkpoint rings -- one per full turn, flash briefly as marbles cross them.
+const checkpointRings = [];
+for (let i = 1; i <= HELIX_TURNS; i++) {
+  const y = TOP_Y - (i / HELIX_TURNS) * HELIX_HEIGHT;
+  const ringMat = new THREE.MeshStandardMaterial({
+    color: 0xbfe6ff, emissive: 0xbfe6ff, emissiveIntensity: 0.4,
+    transparent: true, opacity: 0.35, roughness: 0.4,
+  });
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(HELIX_RADIUS + 0.9, 0.03, 8, 48), ringMat);
+  ring.rotation.x = Math.PI / 2;
+  ring.position.y = y;
+  scene.add(ring);
+  checkpointRings.push({ mesh: ring, mat: ringMat, flash: 0 });
+}
+
+// Slowly rotating rune rings + a few orbiting comets, purely decorative.
+const runeGroup = new THREE.Group();
+scene.add(runeGroup);
+for (let i = 0; i < 4; i++) {
+  const y = TOP_Y - 6 - i * (HELIX_HEIGHT / 4.5);
+  const rune = new THREE.Mesh(
+    new THREE.TorusGeometry(HELIX_RADIUS + 2.2, 0.04, 6, 60),
+    new THREE.MeshStandardMaterial({ color: 0x8877ff, emissive: 0x5544cc, emissiveIntensity: 0.6, transparent: true, opacity: 0.5 })
+  );
+  rune.rotation.x = Math.PI / 2;
+  rune.position.y = y;
+  rune.userData.spinSpeed = 0.06 * (i % 2 === 0 ? 1 : -1);
+  runeGroup.add(rune);
+}
+
+const comets = [];
+for (let i = 0; i < 6; i++) {
+  const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.12, 10, 8), new THREE.MeshStandardMaterial({
+    color: 0xffffff, emissive: 0xaad4ff, emissiveIntensity: 1.4,
+  }));
+  scene.add(mesh);
+  comets.push({
+    mesh,
+    radius: HELIX_RADIUS + 3 + Math.random() * 3,
+    speed: (0.15 + Math.random() * 0.25) * (Math.random() < 0.5 ? 1 : -1),
+    angle: Math.random() * Math.PI * 2,
+    y: TOP_Y - Math.random() * HELIX_HEIGHT,
+  });
+}
+
+// ---- Portal (bottom) ----
+const portalGroup = new THREE.Group();
+portalGroup.position.set(0, PORTAL_Y, 0);
+scene.add(portalGroup);
+for (let i = 0; i < 3; i++) {
+  const ring = new THREE.Mesh(
+    new THREE.TorusGeometry(1.4 - i * 0.35, 0.05, 8, 40),
+    new THREE.MeshStandardMaterial({ color: 0xaa44ff, emissive: 0xaa44ff, emissiveIntensity: 1.0, transparent: true, opacity: 0.7 - i * 0.15 })
+  );
+  ring.rotation.x = Math.PI / 2;
+  ring.userData.spinSpeed = 0.8 - i * 0.2;
+  portalGroup.add(ring);
+}
+const portalGlow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0xaa44ff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+portalGlow.scale.set(5, 5, 1);
+portalGroup.add(portalGlow);
+
+const sourceGlow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0x66ccff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+sourceGlow.position.set(0, TOP_Y, 0);
+sourceGlow.scale.set(3, 3, 1);
+scene.add(sourceGlow);
+
+// ---- Marbles ----
+const marbleGeo = new THREE.SphereGeometry(MARBLE_R, 20, 14);
+const trailGroup = new THREE.Group();
+scene.add(trailGroup);
+let liveMarbles = [];
+let loopsCompleted = 0;
+
+function makeMarble(strand, t) {
+  const { pos, tangent } = helixPointAt(STRAND_OFFSETS[strand], t);
+  const body = physicsWorld.createBody({
+    type: "dynamic",
+    position: { x: pos.x, y: pos.y + MARBLE_R * 1.4, z: pos.z },
+    linearVelocity: { x: tangent.x * SPAWN_KICK, y: tangent.y * SPAWN_KICK, z: tangent.z * SPAWN_KICK },
+  });
+  body.createSphere({ radius: MARBLE_R, density: 1, friction: 0.2, restitution: 0.05 });
+
+  const color = new THREE.Color(STRAND_COLORS[strand]);
+  const mat = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.9, metalness: 0.4, roughness: 0.3 });
+  const mesh = new THREE.Mesh(marbleGeo, mat);
+  const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+  glow.scale.set(MARBLE_R * 7, MARBLE_R * 7, 1);
+  mesh.add(glow);
+  scene.add(mesh);
+
+  const trailGeo = new THREE.BufferGeometry();
+  const trailPos = new Float32Array(TRAIL_LEN * 3);
+  const trailCol = new Float32Array(TRAIL_LEN * 3);
+  for (let i = 0; i < TRAIL_LEN; i++) {
+    trailPos[i*3] = pos.x; trailPos[i*3+1] = pos.y; trailPos[i*3+2] = pos.z;
+    const b = Math.pow(1 - i / (TRAIL_LEN - 1), 1.6);
+    trailCol[i*3] = color.r * b; trailCol[i*3+1] = color.g * b; trailCol[i*3+2] = color.b * b;
+  }
+  trailGeo.setAttribute("position", new THREE.BufferAttribute(trailPos, 3));
+  trailGeo.setAttribute("color", new THREE.BufferAttribute(trailCol, 3));
+  const trailMat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false });
+  const trailLine = new THREE.Line(trailGeo, trailMat);
+  trailGroup.add(trailLine);
+
+  return { body, mesh, mat, trailLine, trailPos, strand, lastCheckpoint: -1 };
+}
+
+function recycleMarble(m) {
+  m.body.destroy();
+  const { pos, tangent } = helixPointAt(STRAND_OFFSETS[m.strand], 0);
+  m.body = physicsWorld.createBody({
+    type: "dynamic",
+    position: { x: pos.x, y: pos.y + MARBLE_R * 1.4, z: pos.z },
+    linearVelocity: { x: tangent.x * SPAWN_KICK, y: tangent.y * SPAWN_KICK, z: tangent.z * SPAWN_KICK },
+  });
+  m.body.createSphere({ radius: MARBLE_R, density: 1, friction: 0.2, restitution: 0.05 });
+  m.lastCheckpoint = -1;
+  for (let i = 0; i < TRAIL_LEN; i++) {
+    m.trailPos[i*3] = pos.x; m.trailPos[i*3+1] = pos.y; m.trailPos[i*3+2] = pos.z;
+  }
+  m.trailLine.geometry.attributes.position.needsUpdate = true;
+}
+
+function spawnMarble(strand, t = 0) {
+  if (liveMarbles.length >= MAX_MARBLES) {
+    const old = liveMarbles.shift();
+    old.body.destroy();
+    scene.remove(old.mesh);
+    old.mesh.material.dispose();
+    trailGroup.remove(old.trailLine);
+    old.trailLine.geometry.dispose();
+  }
+  liveMarbles.push(makeMarble(strand, t));
+}
+
+// ---- Audio ----
+let audioCtx = null;
+let droneStarted = false;
+
+function ensureAudio() {
+  if (audioCtx) return audioCtx;
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return audioCtx;
+}
+
+function startDrone() {
+  if (droneStarted) return;
+  droneStarted = true;
+  const ctx = ensureAudio();
+  const master = ctx.createGain();
+  master.gain.value = 0.05;
+  master.connect(ctx.destination);
+
+  const filter = ctx.createBiquadFilter();
+  filter.type = "lowpass";
+  filter.frequency.value = 400;
+  filter.connect(master);
+
+  for (const freq of [55, 82.5, 110]) {
+    const osc = ctx.createOscillator();
+    osc.type = "sine";
+    osc.frequency.value = freq;
+    const g = ctx.createGain();
+    g.gain.value = 0.5;
+    osc.connect(g).connect(filter);
+    osc.start();
+  }
+
+  // Slow LFO sweeping the filter cutoff for an evolving pad feel.
+  const lfo = ctx.createOscillator();
+  lfo.frequency.value = 0.05;
+  const lfoGain = ctx.createGain();
+  lfoGain.gain.value = 250;
+  lfo.connect(lfoGain).connect(filter.frequency);
+  lfo.start();
+}
+
+function playChime(strand, idx) {
+  const ctx = ensureAudio();
+  if (ctx.state === "suspended") ctx.resume();
+  const freq = STRAND_CHIMES[strand][idx % STRAND_CHIMES[strand].length];
+  const t = ctx.currentTime;
+  const osc = ctx.createOscillator();
+  osc.type = "sine";
+  osc.frequency.setValueAtTime(freq, t);
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0, t);
+  gain.gain.linearRampToValueAtTime(0.12, t + 0.01);
+  gain.gain.exponentialRampToValueAtTime(0.001, t + 0.5);
+  osc.connect(gain).connect(ctx.destination);
+  osc.start(t);
+  osc.stop(t + 0.55);
+}
+
+function playWhoomph() {
+  const ctx = ensureAudio();
+  if (ctx.state === "suspended") ctx.resume();
+  const t = ctx.currentTime;
+  const osc = ctx.createOscillator();
+  osc.type = "sine";
+  osc.frequency.setValueAtTime(180, t);
+  osc.frequency.exponentialRampToValueAtTime(40, t + 0.35);
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.3, t);
+  gain.gain.exponentialRampToValueAtTime(0.001, t + 0.4);
+  osc.connect(gain).connect(ctx.destination);
+  osc.start(t);
+  osc.stop(t + 0.45);
+
+  const bufferSize = ctx.sampleRate * 0.2;
+  const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < bufferSize; i++) data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.4));
+  const noise = ctx.createBufferSource();
+  noise.buffer = buffer;
+  const filter = ctx.createBiquadFilter();
+  filter.type = "lowpass";
+  filter.frequency.value = 500;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.15, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
+  noise.connect(filter).connect(g).connect(ctx.destination);
+  noise.start(t);
+}
+
+function playWarp() {
+  const ctx = ensureAudio();
+  if (ctx.state === "suspended") ctx.resume();
+  const t = ctx.currentTime;
+  for (const mult of [1, 2, 3]) {
+    const osc = ctx.createOscillator();
+    osc.type = "sawtooth";
+    osc.frequency.setValueAtTime(180 * mult, t);
+    osc.frequency.exponentialRampToValueAtTime(1400 * mult, t + 0.35);
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.06 / mult, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.4);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(t);
+    osc.stop(t + 0.45);
+  }
+}
+
+function playGong() {
+  const ctx = ensureAudio();
+  if (ctx.state === "suspended") ctx.resume();
+  const t = ctx.currentTime;
+  const partials = [220, 349, 466, 587, 740];
+  for (const f of partials) {
+    const osc = ctx.createOscillator();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(f, t);
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0, t);
+    gain.gain.linearRampToValueAtTime(0.09, t + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 3.2);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(t);
+    osc.stop(t + 3.3);
+  }
+}
+
+// ---- Spire pulse (click/tap interaction) ----
+const pulseRings = [];
+let shakeTime = 0;
+
+function triggerPulse() {
+  playGong();
+  shakeTime = 0.35;
+  const ring = new THREE.Mesh(
+    new THREE.TorusGeometry(0.9, 0.08, 8, 40),
+    new THREE.MeshStandardMaterial({ color: 0xccbbff, emissive: 0xccbbff, emissiveIntensity: 1.5, transparent: true, opacity: 0.9 })
+  );
+  ring.rotation.x = Math.PI / 2;
+  ring.position.set(0, TOP_Y + 3, 0);
+  scene.add(ring);
+  pulseRings.push({ mesh: ring, age: 0 });
+
+  // A little surprise cascade injected partway down the spire.
+  for (let s = 0; s < 3; s++) spawnMarble(s, 0.04 + Math.random() * 0.15);
+}
+
+function updatePulses(dt) {
+  for (let i = pulseRings.length - 1; i >= 0; i--) {
+    const pr = pulseRings[i];
+    pr.age += dt;
+    const life = 1.8;
+    const t = pr.age / life;
+    pr.mesh.position.y = (TOP_Y + 3) - t * (spireHeight);
+    const scale = 1 + t * 2.5;
+    pr.mesh.scale.set(scale, scale, 1);
+    pr.mesh.material.opacity = 0.9 * (1 - t);
+    if (t >= 1) { scene.remove(pr.mesh); pr.mesh.geometry.dispose(); pulseRings.splice(i, 1); }
+  }
+}
+
+// ---- Pointer interaction: orbit camera + tap-to-pulse ----
+const raycaster = new THREE.Raycaster();
+let dragging = false;
+let pointerDownTime = 0, pointerMoved = false;
+let lastX = 0, lastY = 0;
+let pinchDist = null;
+
+function registerInput() { lastInputTime = performance.now(); autoRotate = false; }
+
+canvas.addEventListener("pointerdown", (e) => {
+  canvas.setPointerCapture(e.pointerId);
+  dragging = true;
+  pointerMoved = false;
+  pointerDownTime = performance.now();
+  lastX = e.clientX; lastY = e.clientY;
+  startDrone();
+});
+
+canvas.addEventListener("pointermove", (e) => {
+  if (!dragging || activeTouches.size >= 2) return;
+  const dx = e.clientX - lastX, dy = e.clientY - lastY;
+  lastX = e.clientX; lastY = e.clientY;
+  if (Math.abs(dx) + Math.abs(dy) > 4) pointerMoved = true;
+  if (pointerMoved) {
+    registerInput();
+    orbitAzimuth -= dx * 0.006;
+    orbitPolar -= dy * 0.006;
+    orbitPolar = Math.max(0.25, Math.min(Math.PI - 0.25, orbitPolar));
+  }
+});
+
+function endPointer(e) {
+  dragging = false;
+  try { canvas.releasePointerCapture(e.pointerId); } catch (_) {}
+  const elapsed = performance.now() - pointerDownTime;
+  if (!pointerMoved && elapsed < 300) {
+    const rect = canvas.getBoundingClientRect();
+    const ndc = new THREE.Vector2(
+      ((e.clientX - rect.left) / rect.width) * 2 - 1,
+      -((e.clientY - rect.top) / rect.height) * 2 + 1
+    );
+    raycaster.setFromCamera(ndc, camera);
+    if (raycaster.intersectObject(spireMesh).length) triggerPulse();
+  }
+}
+canvas.addEventListener("pointerup", endPointer);
+canvas.addEventListener("pointercancel", endPointer);
+
+canvas.addEventListener("wheel", (e) => {
+  e.preventDefault();
+  registerInput();
+  orbitDist = THREE.MathUtils.clamp(orbitDist * (e.deltaY > 0 ? 1.1 : 1/1.1), 8, 70);
+}, { passive: false });
+
+// crude pinch-to-zoom for touch (two-finger)
+const activeTouches = new Map();
+canvas.addEventListener("pointerdown", (e) => activeTouches.set(e.pointerId, { x: e.clientX, y: e.clientY }));
+canvas.addEventListener("pointermove", (e) => {
+  if (!activeTouches.has(e.pointerId)) return;
+  activeTouches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (activeTouches.size === 2) {
+    const pts = [...activeTouches.values()];
+    const d = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+    if (pinchDist) {
+      registerInput();
+      orbitDist = THREE.MathUtils.clamp(orbitDist * (pinchDist / d), 8, 70);
+    }
+    pinchDist = d;
+  }
+});
+function clearTouch(e) { activeTouches.delete(e.pointerId); if (activeTouches.size < 2) pinchDist = null; }
+canvas.addEventListener("pointerup", clearTouch);
+canvas.addEventListener("pointercancel", clearTouch);
+
+document.getElementById("pulse-btn").addEventListener("pointerdown", (e) => {
+  e.stopPropagation();
+  startDrone();
+  triggerPulse();
+});
+
+document.getElementById("launch-btn").addEventListener("pointerdown", (e) => {
+  e.stopPropagation();
+  startDrone();
+  let n = 0;
+  const total = 24;
+  const timer = setInterval(() => {
+    spawnMarble(n % 3, 0);
+    n++;
+    if (n >= total) clearInterval(timer);
+  }, 110);
+});
+
+// ---- HUD ----
+const hudLive = document.getElementById("hud-live");
+const hudLoops = document.getElementById("hud-loops");
+const hintEl = document.getElementById("hint");
+
+// ---- Animation loop ----
+let physicsAccumulator = 0;
+let lastTime = performance.now() / 1000;
+let trickleCooldown = TRICKLE_INTERVAL;
+let trickleStrand = 0;
+
+function animate() {
+  requestAnimationFrame(animate);
+  const now = performance.now() / 1000;
+  const dt = Math.min(now - lastTime, 0.25);
+  lastTime = now;
+
+  // Gentle autonomous trickle so the piece feels alive even with no input yet.
+  trickleCooldown -= dt;
+  if (trickleCooldown <= 0) {
+    spawnMarble(trickleStrand, 0);
+    trickleStrand = (trickleStrand + 1) % 3;
+    trickleCooldown = TRICKLE_INTERVAL;
+  }
+
+  physicsAccumulator += dt;
+  while (physicsAccumulator >= PHYSICS_DT) {
+    physicsWorld.step(PHYSICS_DT, 8);
+    physicsAccumulator -= PHYSICS_DT;
+  }
+
+  for (const m of liveMarbles) {
+    const p = m.body.getPosition(), r = m.body.getRotation();
+    m.mesh.position.set(p.x, p.y, p.z);
+    m.mesh.quaternion.set(r.x, r.y, r.z, r.w);
+
+    const tEst = THREE.MathUtils.clamp((TOP_Y - p.y) / HELIX_HEIGHT, 0, 1);
+    m.mat.emissiveIntensity = 0.7 + 1.3 * tEst;
+
+    const cpIdx = Math.min(HELIX_TURNS - 1, Math.floor(tEst * HELIX_TURNS));
+    if (cpIdx > m.lastCheckpoint) {
+      for (let k = m.lastCheckpoint + 1; k <= cpIdx; k++) {
+        playChime(m.strand, k);
+        checkpointRings[k].flash = 1;
+      }
+      m.lastCheckpoint = cpIdx;
+    }
+
+    const pos = m.trailPos;
+    pos.copyWithin(3, 0, (TRAIL_LEN - 1) * 3);
+    pos[0] = p.x; pos[1] = p.y; pos[2] = p.z;
+    m.trailLine.geometry.attributes.position.needsUpdate = true;
+
+    if (p.y <= PORTAL_Y + 0.5) {
+      playWhoomph();
+      recycleMarble(m);
+      loopsCompleted++;
+      hudLoops.textContent = String(loopsCompleted);
+      setTimeout(playWarp, 260);
+    }
+  }
+  hudLive.textContent = String(liveMarbles.length);
+
+  for (const ring of checkpointRings) {
+    if (ring.flash > 0) {
+      ring.flash = Math.max(0, ring.flash - dt * 2);
+      ring.mat.emissiveIntensity = 0.4 + ring.flash * 2.2;
+      ring.mat.opacity = 0.35 + ring.flash * 0.5;
+    }
+    ring.mesh.rotation.z += dt * 0.05;
+  }
+
+  for (const rune of runeGroup.children) rune.rotation.z += rune.userData.spinSpeed * dt;
+  for (const ring of portalGroup.children) if (ring.userData.spinSpeed) ring.rotation.z += ring.userData.spinSpeed * dt;
+
+  for (const comet of comets) {
+    comet.angle += comet.speed * dt;
+    comet.mesh.position.set(Math.cos(comet.angle) * comet.radius, comet.y, Math.sin(comet.angle) * comet.radius);
+  }
+
+  updatePulses(dt);
+
+  // Resume idle auto-rotate a few seconds after the last drag/zoom/tap.
+  if (!autoRotate && performance.now() - lastInputTime > 4000) autoRotate = true;
+  if (autoRotate) orbitAzimuth += dt * 0.05;
+
+  updateCamera();
+  if (shakeTime > 0) {
+    shakeTime -= dt;
+    const mag = shakeTime * 0.15;
+    camera.position.x += (Math.random() - 0.5) * mag;
+    camera.position.y += (Math.random() - 0.5) * mag;
+  }
+
+  if (droneStarted && hintEl.style.opacity !== "0") hintEl.style.opacity = "0";
+
+  renderer.render(scene, camera);
+}
+
+animate();
+
+</script>
+</body>
+</html>
